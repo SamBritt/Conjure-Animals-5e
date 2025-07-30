@@ -10,16 +10,14 @@ const list = ref([
     id: 1,
     name: 'Wolf',
     attackModifier: 2,
-    attack: [],
-    multiAttack: [{ name: 'bite', dieCount: 2, die: 6, type: 'piercing' }],
+    attack: [{ name: 'bite', dieCount: 2, die: 6, type: 'piercing' }],
     hp: 11
   },
   {
     id: 2,
     name: 'Black Bear',
     attackModifier: 2,
-    attack: [],
-    multiAttack: [
+    attack: [
       { name: 'bite', dieCount: 1, die: 6, type: 'piercing' },
       { name: 'claw', dieCount: 2, die: 4, type: 'slashing' }
     ],
@@ -29,32 +27,28 @@ const list = ref([
     id: 3,
     name: 'Hawk',
     attackModifier: 3,
-    attack: [],
-    multiAttack: [{ name: 'bite', dieCount: 1, die: 4, type: 'piercing' }],
+    attack: [{ name: 'bite', dieCount: 1, die: 4, type: 'piercing' }],
     hp: 8
   },
   {
     id: 4,
     name: 'Boar',
     attackModifier: 5,
-    attack: [],
-    multiAttack: [{ name: 'bite', dieCount: 2, die: 6, type: 'piercing' }],
+    attack: [{ name: 'bite', dieCount: 2, die: 6, type: 'piercing' }],
     hp: 12
   },
   {
     id: 5,
     name: 'Horse',
     attackModifier: 2,
-    attack: [],
-    multiAttack: [{ name: 'bite', dieCount: 2, die: 6, type: 'piercing' }],
+    attack: [{ name: 'bite', dieCount: 2, die: 6, type: 'piercing' }],
     hp: 17
   },
   {
     id: 6,
     name: 'T-Rex',
     attackModifier: 7,
-    attack: [],
-    multiAttack: [{ name: 'bite', dieCount: 4, die: 12, type: 'piercing' }],
+    attack: [{ name: 'bite', dieCount: 4, die: 12, type: 'piercing' }],
     hp: 120
   },
   {
@@ -65,7 +59,6 @@ const list = ref([
       { name: 'Bite', dieCount: 1, die: 8, type: 'piercing' },
       { name: 'Web', dieCount: 0, die: 0, type: null }
     ],
-    multiAttack: [],
     hp: 26
   },
   {
@@ -74,10 +67,7 @@ const list = ref([
     attackModifier: 5,
     attack: [
       { name: 'Rock', dieCount: 1, die: 8, type: 'piercing' },
-    ],
-    multiAttack: [
-      { name: 'Fist', dieCount: 1, die: 8, type: 'piercing' },
-      { name: 'Fist', dieCount: 1, die: 8, type: 'piercing' }
+      { name: 'Punch', dieCount: 1, die: 8, type: 'piercing' },
     ],
     hp: 19
   }

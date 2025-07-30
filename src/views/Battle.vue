@@ -1,10 +1,10 @@
 <script setup>
-import { computed, watchEffect, ref } from 'vue'
+import { computed, ref } from 'vue'
 import CreatureSelect from '@/components/CreatureSelect.vue'
 import RollTable from '@/components/RollTable.vue'
 import Animate from '@/components/Animate.vue'
 import Creature from '@/components/Creature.vue'
-import Counter from '@/components/Counter.vue'
+import CounterConfirm from '@/components/CounterConfirm.vue'
 import Button from '@/components/Button.vue'
 import SideMenu from '@/components/SideMenu.vue'
 import ShieldIcon from '../assets/shield5.svg?component'
@@ -19,8 +19,8 @@ import CancelIcon from '../assets/cancel.svg?component'
 
 const summonCount = ref(0)
 const creatures = ref([])
-const selectedCreature = computed(() => creatures.value[0])
 const enemies = ref([])
+const selectedEnemy = ref()
 
 const showCreatureSelect = ref(false)
 const showFightMenu = ref(false)
@@ -32,9 +32,11 @@ const attackRolls = ref([])
 
 const disAdvantage = ref(false)
 const advantage = ref(false)
+
 const damage = ref(0)
 const damageSplit = ref({})
 const healBy = ref(0)
+const enemySummonCount = ref(0)
 
 const handleToggle = (rollType) => {
   if (rollType === 'advantage') {
@@ -92,6 +94,33 @@ const handleCreatureSelect = (creature) => {
   } else {
     attackingCreatures.value.push(creature)
   }
+}
+
+const handleEnemySelect = (creature) => {
+  selectedEnemy.value = creature
+}
+
+const addEnemies = (count) => {
+  enemySummonCount.value = count
+}
+const removeEnemies = (count) => {
+  enemySummonCount.value = count
+}
+
+const summonEnemies = () => {
+  enemies.value = Array.from({ length: enemySummonCount.value }, (i, index) => ({
+    index: index + 1,
+    name: '',
+    ac: null,
+    hp: 0,
+    missedRolls: []
+  }))
+
+  showEnemyMenu.value = false
+}
+
+const cancelSummonEnemies = () => {
+  showHealthMenu.value = false
 }
 
 const addHealth = (count) => {
@@ -170,6 +199,8 @@ const roll = (die, num = 1) => {
 }
 
 const rollToHit = (die, num = 1) => {
+  let arr
+
   attackingCreatures.value.forEach((creature, idx) => {
     let output = roll(die)
     let secondary
@@ -202,11 +233,12 @@ const rollToHit = (die, num = 1) => {
 
 const rollDamage = () => {
   const damageRolls = attackRolls.value.map((creature) =>
-    creature.creature.multiAttack.map((el) => ({
+    creature.creature.attack.map((el) => ({
       type: el.type,
       total: roll(el.die, el.dieCount)
     }))
   )
+  console.log(damageRolls)
 
   const totalSum = damageRolls
     .flat()
@@ -226,10 +258,42 @@ const rollDamage = () => {
   damageSplit.value = typeSums
 }
 
+const handleRollMiss = (roll) => {
+  selectedEnemy.value.missedRolls.push(roll)
+}
+
+const handleRollSuccess = () => {}
+
 const flattenedRolls = computed(() => {
   let rolls = new Set(attackRolls.value.map((obj) => obj.final))
 
   return Array.from(rolls).sort()
+})
+
+const missedEnemyRolls = computed(() => {
+  return [...new Set(selectedEnemy?.value.missedRolls)]
+})
+
+const availableAttacks = computed(() => {
+   const result = []
+
+  for (const creature of attackingCreatures.value) {
+    for (const attack of creature.attack) { 
+      const alreadyExists = result.some(
+        a => a.creature === creature.name && a.name === attack.name
+      )
+
+      if (!alreadyExists) {
+        result.push({
+          creature: creature.name,
+          name: attack.name,
+          damage: attack.damage
+        })
+      }
+    }
+  }
+
+  return result
 })
 
 const buttonProps = (style) => {
@@ -299,28 +363,13 @@ const buttonProps = (style) => {
             <SideMenu
               v-if="showHealthMenu"
               class="left-full">
-              <div class="flex">
-                <div class="p-4">
-                  <h4 class="text-center mb-2">{{ selectedHealthType }}</h4>
-                  <Counter
-                    @increase="(count) => addHealth(count)"
-                    @decrease="(count) => removeHealth(count)" />
-                </div>
-
-                <div class="">
-                  <button
-                    @click="submitHealthChange"
-                    class="flex items-center justify-center p-2 bg-emerald-300 hover:bg-emerald-400 transition-all ease w-9 h-1/2 rounded-tr-md">
-                    <CheckIcon class="fill-white" />
-                  </button>
-
-                  <button
-                    @click="cancelHealthChange"
-                    class="flex items-center justify-center p-2 bg-rose-400 hover:bg-rose-500 transition-all ease w-9 h-1/2 rounded-br-md">
-                    <CancelIcon class="fill-white" />
-                  </button>
-                </div>
-              </div>
+              <CounterConfirm
+                @increase="(count) => addHealth(count)"
+                @decrease="(count) => removeHealth(count)"
+                @submit="submitHealthChange"
+                @cancel="cancelHealthChange">
+                {{ selectedHealthType }}
+              </CounterConfirm>
             </SideMenu>
           </Animate>
         </div>
@@ -337,10 +386,13 @@ const buttonProps = (style) => {
 
         <Animate>
           <SideMenu v-if="showEnemyMenu">
-            <div class="p-4">
-              <h4>Enemies</h4>
-              <Counter />
-            </div>
+            <CounterConfirm
+              @increase="(count) => addEnemies(count)"
+              @decrease="(count) => removeEnemies(count)"
+              @submit="summonEnemies"
+              @cancel="cancelSummonEnemies">
+              Enemies
+            </CounterConfirm>
           </SideMenu>
         </Animate>
 
@@ -360,21 +412,18 @@ const buttonProps = (style) => {
                 <p>selected</p>
               </span>
 
+              <template v-if="attackingCreatures.length">
+                <div
+                  class="flex gap-2">
+                  <div
+                    v-for="attack in availableAttacks"
+                    class="bg-stone-500 p-2 rounded-md outline outline-white">
+                    {{ attack.name }}
+                  </div>
+                </div>
+              </template>
+
               <div class="flex flex-col gap-2">
-                <span class="flex gap-2">
-                  <Button
-                    v-if="selectedCreature.multiAttack"
-                    outline
-                    text="Multiattack" />
-
-                  <template v-if="selectedCreature.attack">
-                    <Button
-                      v-for="attack in selectedCreature.attack"
-                      outline
-                      :text="attack.name" />
-                  </template>
-                </span>
-
                 <span class="flex gap-2">
                   <Button
                     outline
@@ -393,6 +442,7 @@ const buttonProps = (style) => {
                   <Button
                     asIcon
                     info
+                    :disabled="!selectedEnemy"
                     @click="rollToHit(20, attackingCreatures.length)">
                     <DiceIcon />
                   </Button>
@@ -415,12 +465,14 @@ const buttonProps = (style) => {
                     v-for="roll in flattenedRolls"
                     class="relative flex items-center justify-center w-10 h-10 rounded-full bg-zinc-600 text-center">
                     <button
-                      class="absolute flex justify-center items-center -left-2 -top-1 w-4 h-4 bg-rose-400 rounded-full">
+                      class="absolute flex justify-center items-center -left-2 -top-1 w-4 h-4 bg-rose-400 rounded-full"
+                      @click="() => handleRollMiss(roll)">
                       x
                     </button>
                     {{ roll }}
                     <button
-                      class="absolute flex justify-center items-center -right-2 -top-1 w-4 h-4 bg-emerald-400 rounded-full">
+                      class="absolute flex justify-center items-center -right-2 -top-1 w-4 h-4 bg-emerald-400 rounded-full"
+                      @click="() => handleRollSuccess(roll)">
                       +
                     </button>
                   </div>
@@ -453,11 +505,27 @@ const buttonProps = (style) => {
             </div>
           </SideMenu>
         </Transition>
+      </div>
 
-        <div class="flex">
-          <div
-            v-for="enemy in enemies"
-            class="w-12 h-12 bg-rose-400 rounded-full"></div>
+      <div class="flex flex-col bg-slate-500 w-fit p-2">
+        <h3>Enemy AC: ??</h3>
+        <div v-if="selectedEnemy?.missedRolls">
+          <h3>Missed Rolls:</h3>
+          <span v-for="(roll, idx) in missedEnemyRolls">{{ roll }},</span>
+        </div>
+      </div>
+
+      <div
+        v-if="enemies.length"
+        class="flex flex-col justify-center items-center gap-4 h-full">
+        <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
+          <Creature
+            v-for="(enemy, idx) in enemies"
+            type="enemy"
+            :key="`enemy-${idx}`"
+            @select="(enemy) => handleEnemySelect(enemy)"
+            :creature="enemy"
+            :index="idx + 1" />
         </div>
       </div>
 
@@ -467,6 +535,8 @@ const buttonProps = (style) => {
         <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
           <Creature
             v-for="(creature, idx) in creatures"
+            type="creature"
+            :key="`summon-${idx}`"
             @select="(creature) => handleCreatureSelect(creature)"
             :creature="creature"
             :index="idx + 1" />

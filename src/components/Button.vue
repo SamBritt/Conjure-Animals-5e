@@ -33,20 +33,22 @@ const buttonProps = computed(() => {
 
 const buttonStyles = computed(() => {
   const styles = [
-    `flex`,
-    `justify-center`,
-    `items-center`,
     `text-black`,
     `transition-all`,
     `ease`,
     `active:scale-95`
   ]
 
-  if (props.rounded) styles.push('rounded-full', 'p-2', 'w-12', 'h-12')
-  else if (!props.asIcon) styles.push(`rounded-md`, `py-1`, `px-2`) 
+  if (props.rounded) styles.push('rounded-full', 'w-12', 'h-12')
+  else if (!props.asIcon) styles.push(`rounded-md`, `py-1`, `px-2`)
   else styles.push(`p-0`)
 
-  if (props.small) styles.push(`w-5`, `h-5`, `border-1`, `p-0`)
+  if (props.rounded && props.small) styles.push('p-0')
+  else if(props.asIcon) styles.push('p-0')
+  else styles.push('p-2')
+
+  if (props.small) styles.push(`w-5`, `h-5`, `border-1`)
+  else styles.push(`flex`, `justify-center`, `items-center`)
 
   if (props.disabled) {
     styles.push('cursor-not-allowed', 'opacity-50')
@@ -58,7 +60,7 @@ const buttonStyles = computed(() => {
     if (props.success) styles.push('bg-emerald-300', 'text-zinc-100')
     if (props.danger) styles.push('bg-rose-400', 'text-zinc-100')
     if (!(props.primary || props.info || props.success || props.danger || props.asIcon)) {
-      styles.push('bg-white')
+      styles.push('bg-white', 'text-zinc-800')
     }
   }
 
@@ -83,7 +85,6 @@ const buttonStyles = computed(() => {
     if (props.info) styles.push('fill-amber-200', 'text-amber-800')
     if (props.success) styles.push('fill-emerald-300')
     if (props.danger) styles.push('fill-rose-400')
-
   }
 
   return styles
