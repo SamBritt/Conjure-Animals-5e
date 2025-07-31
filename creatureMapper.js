@@ -30,17 +30,27 @@ function calculateModifier(score) {
   return Math.floor((score - 10) / 2);
 }
 
+// Fix: Update parseAbilities to handle saving throws from the "save" property
 function parseAbilities(raw) {
   const keys = ["str", "dex", "con", "int", "wis", "cha"];
-  const saves = raw.save || {};
+  const saves = raw.save || {}; // Get the save object from raw data
   const abilities = {};
 
   for (const key of keys) {
     const value = raw[key];
+    let saveValue = null;
+
+    // Check if there's a save bonus for this ability
+    if (saves[key] != null) {
+      // Convert "+7" format to just 7, or handle plain numbers
+      const saveStr = String(saves[key]);
+      saveValue = saveStr.startsWith('+') ? parseInt(saveStr.slice(1)) : parseInt(saveStr);
+    }
+
     abilities[key] = {
       value: value ?? null,
       mod: value != null ? calculateModifier(value) : null,
-      save: saves[key] != null ? parseInt(saves[key]) : null
+      save: saveValue
     };
   }
   return abilities;
@@ -50,21 +60,35 @@ function parseSkills(raw) {
   return raw.skill || {};
 }
 
+// Fix 3: Update parseSenses function to handle array format properly
 function parseSenses(raw) {
   const senses = {};
-  (raw.senses || []).forEach(s => {
-    // Handle different sense formats
-    if (typeof s === 'string') {
-      const match = s.match(/(\w+)\s*(\d+)/);
-      if (match) {
-        senses[match[1].toLowerCase()] = parseInt(match[2]);
+
+  // Handle senses array
+  if (raw.senses && Array.isArray(raw.senses)) {
+    raw.senses.forEach(s => {
+      if (typeof s === 'string') {
+        // Handle formats like "darkvision 60 ft."
+        const match = s.match(/(\w+)\s+(\d+)\s*ft/i);
+        if (match) {
+          senses[match[1].toLowerCase()] = parseInt(match[2]);
+        } else {
+          // Handle other sense formats without numbers
+          const senseMatch = s.match(/^(\w+)/);
+          if (senseMatch) {
+            senses[senseMatch[1].toLowerCase()] = true;
+          }
+        }
       }
-    }
-  });
+    });
+  }
+
+  // Add passive perception
   senses.passivePerception = raw.passive;
   return senses;
 }
 
+// Fix: Update parseAC to clean {@spell} and {@item} tags in the "from" array
 function parseAC(ac) {
   if (!ac) return null;
   if (typeof ac === 'number') return ac;
@@ -74,9 +98,14 @@ function parseAC(ac) {
     if (typeof primary === 'object') {
       return {
         value: primary.ac || null,
-        from: primary.from ? primary.from.map(item => 
-          item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-        ) : null
+        from: primary.from ? primary.from.map(item => {
+          // Clean various 5etools tags from AC sources
+          return item
+            .replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')      // Clean {@item} tags
+            .replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')     // Clean {@spell} tags
+            .replace(/\{@[^}]+\}/g, '')                            // Clean any other tags
+            .trim();
+        }) : null
       };
     }
   }
@@ -101,31 +130,71 @@ function parseSize(size) {
   return size;
 }
 
+
 function parseType(type) {
   if (!type) return null;
   if (typeof type === 'string') return type;
   if (typeof type === 'object') {
-    const base = type.type || '';
-    const tags = type.tags ? ` (${type.tags.join(', ')})` : '';
+    let base = '';
+    
+    // Handle nested type structure like {"type": {"choose": ["celestial", "fiend"]}}
+    if (type.type && typeof type.type === 'object' && type.type.choose) {
+      base = type.type.choose.join(' or ');
+    } else if (type.type) {
+      base = type.type;
+    }
+    
+    let tags = '';
+    if (type.tags && Array.isArray(type.tags)) {
+      const tagStrings = type.tags.map(tag => {
+        if (typeof tag === 'string') return tag;
+        if (typeof tag === 'object' && tag.tag) {
+          // Handle prefix (like "Wood" for "Wood Elf")
+          return tag.prefix ? `${tag.prefix} ${tag.tag}` : tag.tag;
+        }
+        return String(tag);
+      });
+      tags = ` (${tagStrings.join(', ')})`;
+    }
+    
+    // Handle swarm types - add swarmSize information
+    if (type.swarmSize) {
+      const sizeMap = {
+        'T': 'Tiny',
+        'S': 'Small', 
+        'M': 'Medium',
+        'L': 'Large',
+        'H': 'Huge',
+        'G': 'Gargantuan'
+      };
+      const swarmSizeName = sizeMap[type.swarmSize] || type.swarmSize;
+      
+      // If we already have tags, add swarm info to them
+      if (tags) {
+        tags = ` (swarm of ${swarmSizeName}, ${tags.slice(2, -1)})`;
+      } else {
+        tags = ` (swarm of ${swarmSizeName})`;
+      }
+    }
+    
     return base + tags;
   }
   return null;
 }
-
 function calculateProficiencyBonus(cr) {
   if (!cr) return null;
-  
+
   // Handle complex CR objects (like coven CRs)
   const crValue = typeof cr === 'object' ? cr.cr : cr;
-  
+
   // Convert to string if it's a number
   const crString = String(crValue);
 
   // Handle fractional CRs
-  const crNumeric = crString.includes('/') ? 
-    parseFloat(crString.split('/')[0]) / parseFloat(crString.split('/')[1]) : 
+  const crNumeric = crString.includes('/') ?
+    parseFloat(crString.split('/')[0]) / parseFloat(crString.split('/')[1]) :
     parseFloat(crString);
-    
+
   // Proficiency bonus progression: +2 at CR 0-4, then +1 every 4 levels
   if (crNumeric < 5) return 2;
   return Math.min(9, 2 + Math.floor(crNumeric / 4));
@@ -141,7 +210,7 @@ function calculateInitiative(dexMod) {
 
 function parseAlignment(alignment, alignmentPrefix = null) {
   if (!alignment) return [];
-  
+
   const result = alignment.map(a => {
     if (typeof a === 'string') return a;
     if (typeof a === 'object') {
@@ -149,19 +218,19 @@ function parseAlignment(alignment, alignmentPrefix = null) {
     }
     return a;
   });
-  
+
   // Add prefix if it exists
   if (alignmentPrefix && result.length > 0) {
     return [alignmentPrefix + result.join(' ')];
   }
-  
+
   return result;
 }
 
 function parseResistances(raw, key) {
   const data = raw[key];
   if (!data) return [];
-  
+
   return data.map(item => {
     if (typeof item === 'string') return item;
     if (typeof item === 'object') {
@@ -179,6 +248,7 @@ function parseResistances(raw, key) {
   }).flat();
 }
 
+// Fix: Update parseMultiAttack to clean text properly
 function parseMultiAttack(rawActions) {
   const multi = rawActions.find(a => a.name.toLowerCase().includes("multiattack"));
   if (!multi || !multi.entries?.[0]) return null;
@@ -192,12 +262,8 @@ function parseMultiAttack(rawActions) {
     text.toLowerCase().includes(name.toLowerCase())
   );
 
-  // Clean the text properly including spell references
-  const cleanText = text
-    .replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1') // Clean spell references
-    .replace(/\{@.*?\}/g, '') // Clean any other tags
-    .replace(/\s+/g, ' ')
-    .trim();
+  // UPDATED: Clean the text using cleanComplexText instead of basic cleaning
+  const cleanText = cleanComplexText(text);
 
   return {
     text: cleanText,
@@ -209,7 +275,7 @@ function parseMultiAttack(rawActions) {
 function parseDiceNotation(diceString) {
   const diceMatch = diceString.match(/(\d+)d(\d+)(?:\s*[+]\s*(\d+))?/);
   if (!diceMatch) return null;
-  
+
   return {
     dieCount: parseInt(diceMatch[1]),
     die: parseInt(diceMatch[2]),
@@ -221,29 +287,46 @@ function calculateAverageDamage(diceData) {
   return Math.floor(diceData.dieCount * (diceData.die + 1) / 2) + diceData.modifier;
 }
 
+// Fix 3: Update extractDamageFromText to handle variable damage types
 function extractDamageFromText(text) {
   if (!text) return [];
-  
+
   const results = [];
-  
-  // Handle format: {@h}25 ({@damage 5d6 + 8}) damage of a type chosen...
-  const variableDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+damage of a type/gi;
+
+  // Handle variable damage types like "Necrotic or Radiant damage (empyrean's choice)"
+  const variableTypeRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+\s+or\s+[A-Za-z]+)\s+damage\s*\([^)]*choice[^)]*\)/gi;
   let match;
-  
-  while ((match = variableDamageRegex.exec(text))) {
+
+  while ((match = variableTypeRegex.exec(text))) {
     const diceData = parseDiceNotation(match[2]);
     if (diceData) {
       results.push({
         ...diceData,
-        type: 'variable'
+        type: match[3].toLowerCase(),
+        isVariable: true
       });
     }
   }
-  
+
+  // Handle format: {@h}25 ({@damage 5d6 + 8}) damage of a type chosen...
+  if (results.length === 0) {
+    const variableDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+damage of a type/gi;
+
+    while ((match = variableDamageRegex.exec(text))) {
+      const diceData = parseDiceNotation(match[2]);
+      if (diceData) {
+        results.push({
+          ...diceData,
+          type: 'variable'
+        });
+      }
+    }
+  }
+
   // Handle multiple damage instances: "12 ({@damage 2d6 + 5}) Slashing damage plus 17 ({@damage 5d6}) Fire damage"
   if (results.length === 0) {
     const multiDamageRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
-    
+
     while ((match = multiDamageRegex.exec(text))) {
       const diceData = parseDiceNotation(match[2]);
       if (diceData) {
@@ -254,7 +337,7 @@ function extractDamageFromText(text) {
       }
     }
   }
-  
+
   // Handle format: {@h}13 ({@damage 2d8 + 4}) Piercing damage
   if (results.length === 0) {
     const hDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
@@ -268,7 +351,7 @@ function extractDamageFromText(text) {
       }
     }
   }
-  
+
   // Handle simple format: {@damage 1d4 + 3} Bludgeoning damage
   if (results.length === 0) {
     const simpleDamageRegex = /\{@(?:damage|h) ([^}]+)\}\s+([A-Za-z]+)\s+damage/gi;
@@ -282,7 +365,7 @@ function extractDamageFromText(text) {
       }
     }
   }
-  
+
   // Handle standalone {@damage} tags: 14 ({@damage 4d6}) Lightning damage
   if (results.length === 0) {
     const standaloneDamageRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
@@ -296,7 +379,7 @@ function extractDamageFromText(text) {
       }
     }
   }
-  
+
   // Handle raw format: "10 (2d6 + 3) Bludgeoning damage"
   if (results.length === 0) {
     const rawDamageRegex = /(\d+)\s*\((\d+)d(\d+)(?:\s*[+]\s*(\d+))?\)\s+([A-Za-z]+)\s+damage/gi;
@@ -309,19 +392,19 @@ function extractDamageFromText(text) {
       });
     }
   }
-  
+
   return results;
 }
 
 function extractHealingFromText(text) {
   if (!text) return [];
-  
+
   const results = [];
-  
+
   // Handle healing format: "30 ({@dice 6d8 + 3}) hit points"
   const healingRegex = /(\d+)\s*\(\{@dice ([^}]+)\}\)\s+hit points/gi;
   let match;
-  
+
   while ((match = healingRegex.exec(text))) {
     const diceData = parseDiceNotation(match[2]);
     if (diceData) {
@@ -332,7 +415,7 @@ function extractHealingFromText(text) {
       });
     }
   }
-  
+
   // Also handle raw healing format: "30 (6d8 + 3) hit points"
   if (results.length === 0) {
     const rawHealingRegex = /(\d+)\s*\((\d+)d(\d+)(?:\s*[+]\s*(\d+))?\)\s+hit points/gi;
@@ -346,7 +429,7 @@ function extractHealingFromText(text) {
       });
     }
   }
-  
+
   return results;
 }
 
@@ -354,10 +437,51 @@ function parseDamageEntry(entry) {
   return extractDamageFromText(entry);
 }
 
-// Update cleanComplexText to handle {@atk ms} and {@atk rs}:
-function cleanComplexText(text) {
-    let result = text;
+// Fix: Update cleanSpellEntry to remove asterisks from spell names
+function cleanSpellEntry(spell) {
+  // Handle string spells
+  if (typeof spell === 'string') {
+    return spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                .replace(/\{@damage ([^}]+)\}/g, '$1')
+                .replace(/\{@dice ([^}]+)\}/g, '$1')
+                .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
+                .replace(/\\"/g, '"');
+  }
   
+  // Handle object spells with entry property
+  if (typeof spell === 'object' && spell !== null) {
+    if (spell.entry) {
+      return spell.entry.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                        .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                        .replace(/\{@damage ([^}]+)\}/g, '$1')
+                        .replace(/\{@dice ([^}]+)\}/g, '$1')
+                        .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                        .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
+                        .replace(/\\"/g, '"');
+    }
+    // Handle other potential object structures
+    if (spell.name) {
+      return spell.name.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                       .replace(/\{@damage ([^}]+)\}/g, '$1')
+                       .replace(/\{@dice ([^}]+)\}/g, '$1')
+                       .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+                       .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
+                       .replace(/\\"/g, '"');
+    }
+    console.log('Unknown spell object structure:', JSON.stringify(spell, null, 2));
+    return 'Unknown Spell';
+  }
+  
+  // Fallback for other types
+  return String(spell);
+}
+
+// Fix: Update cleanComplexText to handle {@filter} tags
+function cleanComplexText(text) {
+  let result = text;
+
   // Replace attack types using lookup
   for (const { pattern, replacement } of ATTACK_TYPE_PATTERNS) {
     result = result.replace(pattern, replacement);
@@ -371,7 +495,7 @@ function cleanComplexText(text) {
     .replace(/\{@hom\}/g, 'Hit or Miss: ')
     .replace(/\{@damage ([^}]+)\}/g, '$1')
     .replace(/\{@dc (\d+)\}/g, 'DC $1')
-    .replace(/\{@dice ([^}]+)\}/g, '$1') // This should already handle {@dice} tags
+    .replace(/\{@dice ([^}]+)\}/g, '$1')
     .replace(/\{@hazard ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@action [^|}]+(?:\|[^|}]+)?\|([^}]+)\}/g, '$1')
     .replace(/\{@action ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
@@ -380,12 +504,33 @@ function cleanComplexText(text) {
     .replace(/\{@creature ([^|}]+)\|[^|}]*\|([^}]+)\}/g, '$2')
     .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-    .replace(/\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^}]*)?\}/g, '$1')
-    .replace(/\{@status ([^|}]+)(?:\|\|[^}]*)?\}/g, '$1')
+    .replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    .replace(/\{@sense ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    .replace(/\{@filter ([^|}]+)(?:\|[^}]*)?\}/g, '$1')  // ADD: Handle {@filter} tags
+    // UPDATED: Handle complex {@status} tags with || separator
+    .replace(/\{@status ([^|}]+)\|\|([^}]+)\}/g, '$2')  // Use display text after ||
+    .replace(/\{@status ([^|}]+)(?:\|[^}]*)?\}/g, '$1')  // Regular {@status} tags
+    // UPDATED: Better handling of variant rules with display text
+    .replace(/\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, rule, displayText) => {
+      // If there's a display text after the second |, use that, otherwise use the rule name
+      return displayText || rule;
+    })
+    // UPDATED: Better {@quickref} handling - more flexible parameter parsing
+    .replace(/\{@quickref ([^|}]+)(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, text, displayText) => {
+      // If there's display text (last parameter), use that, otherwise use the main text
+      return displayText || text;
+    })
     .replace(/\{@actTrigger\}/g, 'Trigger:')
+    // Handle specific response + save combinations FIRST (more specific patterns)
     .replace(/\{@actResponse d\}\{@actSave dex\}/g, 'Response—Dexterity Saving Throw:')
+    .replace(/\{@actResponse d\}\{@actSave str\}/g, 'Response—Strength Saving Throw:')
+    .replace(/\{@actResponse d\}\{@actSave con\}/g, 'Response—Constitution Saving Throw:')
+    .replace(/\{@actResponse d\}\{@actSave int\}/g, 'Response—Intelligence Saving Throw:')
+    .replace(/\{@actResponse d\}\{@actSave wis\}/g, 'Response—Wisdom Saving Throw:')
+    .replace(/\{@actResponse d\}\{@actSave cha\}/g, 'Response—Charisma Saving Throw:')
+    // Handle remaining individual patterns (less specific, so they come after)
     .replace(/\{@actResponse ([^}]+)\}/g, (match, response) => {
-      if (response === 'd') return 'Response—Dexterity Saving Throw:';
+      if (response === 'd') return 'Response—Saving Throw:';
       return `Response—${response}:`;
     })
     .replace(/\{@actSave (con|str|dex|int|wis|cha)\}/g, (match, ability) => {
@@ -405,10 +550,10 @@ function cleanComplexText(text) {
     .replace(/\{@[^}]+\}/g, '')
     .replace(/\s+/g, ' ')
     .replace(/^[,\s]+/, '')
-    .replace(/\\"/g, '"')  // Add this line to unescape all quotes
+    .replace(/\\"/g, '"')
     .trim();
 
-    return result;
+  return result;
 }
 
 // Helper function to escape regex special characters
@@ -416,35 +561,53 @@ function escapeRegex(string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Updated parseGear function to handle object structures properly
+
+// Fix 2: Update parseGear function to handle attachedItems
 function parseGear(raw) {
-  if (!raw.gear) return [];
-  return raw.gear.map(item => {
-    // Handle string items
-    if (typeof item === 'string') {
-      return item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
-    }
-    // Handle object items - common patterns in 5etools
-    if (typeof item === 'object' && item !== null) {
-      // If it has a direct name property
-      if (item.name) {
-        return item.name.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+  const gear = [];
+
+  // Handle gear property (existing functionality)
+  if (raw.gear) {
+    const gearItems = raw.gear.map(item => {
+      if (typeof item === 'string') {
+        return item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
       }
-      // If it has an item property
-      if (item.item) {
-        return item.item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+      if (typeof item === 'object' && item !== null) {
+        if (item.name) {
+          return item.name.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+        }
+        if (item.item) {
+          return item.item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+        }
+        if (item.entry) {
+          return item.entry.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+        }
+        console.log('Unknown gear object structure:', JSON.stringify(item, null, 2));
+        return 'Unknown Item';
       }
-      // If it has some other structure, try to extract meaningful info
-      if (item.entry) {
-        return item.entry.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+      return String(item);
+    });
+    gear.push(...gearItems);
+  }
+
+  // Handle attachedItems property (NEW)
+  if (raw.attachedItems) {
+    const attachedItems = raw.attachedItems.map(item => {
+      // attachedItems format is usually "itemname|source"
+      if (typeof item === 'string') {
+        // Split on | and take the first part, then clean it up
+        const itemName = item.split('|')[0];
+        // Convert to title case and clean up
+        return itemName.split(/[-_]/)
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ');
       }
-      // Debug: log the object structure so we can see what it looks like
-      console.log('Unknown gear object structure:', JSON.stringify(item, null, 2));
-      return 'Unknown Item';
-    }
-    // Fallback for other types
-    return String(item);
-  });
+      return String(item);
+    });
+    gear.push(...attachedItems);
+  }
+
+  return gear;
 }
 
 // Fix 2: Add otherSources parsing function  
@@ -456,42 +619,46 @@ function parseOtherSources(raw) {
   }));
 }
 
-// Updated parseAttackComponents function to handle multiple damage types
 function parseAttackComponents(entry) {
   const components = {};
-  
+
   // Parse attack type using lookup
   components.attackType = detectAttackType(entry);
-  
+
   // Parse to hit bonus (just the number)
   const hitMatch = entry.match(/\{@hit ([-+]?\d+)/);
   if (hitMatch) {
     components.toHit = parseInt(hitMatch[1]);
   }
-  
-  // Parse range/reach - handle hybrid attacks
-  const rangeMatch = entry.match(/range (\d+(?:\/\d+)?) ft/i);
-  const reachMatch = entry.match(/reach (\d+) ft/i);
-  
+
+  // Parse range/reach - UPDATED to handle "ranged X/Y ft" format
+  const rangeMatch = entry.match(/ranged (\d+)(?:\/(\d+))?\s*ft/i);
+  const reachMatch = entry.match(/reach (\d+)\s*ft/i);
+
   if (entry.includes('{@atkr m,r}') && reachMatch && rangeMatch) {
     // Hybrid attack - show both
     components.range = `reach ${reachMatch[1]} ft. or range ${rangeMatch[1]} ft`;
   } else if (rangeMatch) {
-    components.range = rangeMatch[1] + ' ft';
+    // Handle ranged format properly
+    if (rangeMatch[2]) {
+      components.range = `${rangeMatch[1]}/${rangeMatch[2]} ft`;
+    } else {
+      components.range = `${rangeMatch[1]} ft`;
+    }
   } else if (reachMatch) {
-    components.range = reachMatch[1] + ' ft';
+    components.range = `${reachMatch[1]} ft`;
   }
-  
+
   // Parse ALL damage components using the shared utility
   const allDamage = extractDamageFromText(entry);
-  
+
   if (allDamage.length > 0) {
     // Set primary damage (first damage type)
     const primaryDamage = allDamage[0];
     components.damageAverage = calculateAverageDamage(primaryDamage);
     components.damageFormula = `${primaryDamage.dieCount}d${primaryDamage.die}${primaryDamage.modifier ? ` + ${primaryDamage.modifier}` : ''}`;
     components.damageType = primaryDamage.type;
-    
+
     // Handle additional damage types (if any)
     if (allDamage.length > 1) {
       components.additionalDamage = allDamage.slice(1).map(d => ({
@@ -501,7 +668,7 @@ function parseAttackComponents(entry) {
       }));
     }
   }
-  
+
   // Handle variable damage types like "damage of a type chosen by the cataclysm"
   if (entry.includes('damage of a type chosen')) {
     components.damageType = 'variable';
@@ -510,7 +677,7 @@ function parseAttackComponents(entry) {
       components.damageOptions = optionsMatch[1].trim();
     }
   }
-  
+
   // Parse saving throw information
   const saveMatch = entry.match(/\{@actSave (con|str|dex|int|wis|cha)\}/);
   if (saveMatch) {
@@ -521,33 +688,33 @@ function parseAttackComponents(entry) {
     components.saveAbility = saveMatch[1];
     components.saveType = `${abilityNames[saveMatch[1]]} Saving Throw`;
   }
-  
+
   // Parse DC
   const dcMatch = entry.match(/\{@dc (\d+)\}/);
   if (dcMatch) {
     components.saveDC = parseInt(dcMatch[1]);
   }
-  
+
   // Parse save failure effects
   const failures = {};
   const firstFailMatch = entry.match(/\{@actSaveFail 1\}\s*([^{]*?)(?=\{@actSaveFail|$)/);
   if (firstFailMatch) {
     failures.first = firstFailMatch[1].trim();
   }
-  
+
   const secondFailMatch = entry.match(/\{@actSaveFail 2\}\s*([^{]*?)(?=\{@actSaveFail|$)/);
   if (secondFailMatch) {
     failures.second = secondFailMatch[1].trim();
   }
-  
+
   if (Object.keys(failures).length > 0) {
     components.saveFailures = failures;
   }
-  
+
   return components;
 }
 
-// Updated parseAttacks function (simplified recharge section)
+// Fix 4: Update the Longbow range parsing in parseAttacks
 function parseAttacks(rawActions) {
   return rawActions
     .filter(a => a.entries?.[0] && (/\{@atk/.test(a.entries[0]) || /\{@hit /.test(a.entries[0])))
@@ -555,11 +722,11 @@ function parseAttacks(rawActions) {
       const entry = a.entries[0];
       const hitMatch = entry.match(/\{@hit ([-+]?\d+)/);
       const attackModifier = hitMatch ? parseInt(hitMatch[1]) : null;
-      
-      // Parse range
-      const rangeMatch = entry.match(/range (\d+)(?:\/(\d+))? ft/i);
-      const reachMatch = entry.match(/reach (\d+) ft/i);
-      
+
+      // Parse range - UPDATED to handle "ranged X/Y ft" format
+      const rangeMatch = entry.match(/ranged (\d+)(?:\/(\d+))?\s*ft/i);
+      const reachMatch = entry.match(/reach (\d+)\s*ft/i);
+
       const range = rangeMatch ? {
         normal: parseInt(rangeMatch[1]),
         long: rangeMatch[2] ? parseInt(rangeMatch[2]) : null,
@@ -590,18 +757,18 @@ function parseAttacks(rawActions) {
 
 function parseComplexAction(action) {
   // Check if this has a nested list structure (like Cataclysmic Event)
-  const hasNestedList = action.entries?.some(entry => 
+  const hasNestedList = action.entries?.some(entry =>
     typeof entry === 'object' && entry.type === 'list'
   );
-  
+
   if (hasNestedList) {
     return parseStructuredAction(action);
   }
-  
+
   // Fallback to simple text parsing for non-structured actions
   function processEntries(entries) {
     if (!Array.isArray(entries)) return [];
-    
+
     return entries.map(entry => {
       if (typeof entry === 'string') {
         return cleanComplexText(entry);
@@ -616,10 +783,10 @@ function parseComplexAction(action) {
       }
     }).filter(Boolean);
   }
-  
+
   function processListItems(items) {
     if (!Array.isArray(items)) return [];
-    
+
     return items.map(item => {
       if (item.type === 'item') {
         const name = item.name ? cleanComplexText(item.name) : '';
@@ -629,7 +796,7 @@ function parseComplexAction(action) {
       return typeof item === 'string' ? cleanComplexText(item) : '';
     }).filter(Boolean);
   }
-  
+
   return processEntries(action.entries || []).join(' ');
 }
 
@@ -638,7 +805,7 @@ function parseStructuredAction(action) {
     description: '',
     options: []
   };
-  
+
   // Find the description and list
   for (const entry of action.entries || []) {
     if (typeof entry === 'string') {
@@ -648,13 +815,13 @@ function parseStructuredAction(action) {
       result.options = entry.items.map(item => parseActionOption(item));
     }
   }
-  
+
   return result;
 }
 
 function parseActionOption(item) {
   if (item.type !== 'item') return null;
-  
+
   const option = {
     name: item.name ? cleanComplexText(item.name) : '',
     saveType: null,
@@ -666,32 +833,32 @@ function parseActionOption(item) {
     conditions: [],
     text: ''
   };
-  
+
   // Process each entry in the option
   for (const entry of item.entries || []) {
     if (typeof entry === 'string') {
       // Extract structured data from the text
       option.text = cleanComplexText(entry);
-      
+
       // Parse save type
       const saveMatch = entry.match(/\{@actSave (con|str|dex|int|wis|cha)\}/);
       if (saveMatch) {
         option.saveType = saveMatch[1];
       }
-      
+
       // Parse DC
       const dcMatch = entry.match(/\{@dc (\d+)\}/);
       if (dcMatch) {
         option.saveDC = parseInt(dcMatch[1]);
       }
-      
+
       // Parse area effects
       const areaMatch = entry.match(/(\d+)-foot(?:-radius)?\s+\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^}]*)?\}/);
       if (areaMatch) {
         option.areaSize = areaMatch[1] + '-foot';
         option.areaType = areaMatch[2].toLowerCase().trim();
       }
-      
+
       // Parse damage instances using shared utility
       const damageData = extractDamageFromText(entry);
       option.damage = damageData.map(d => ({
@@ -702,14 +869,14 @@ function parseActionOption(item) {
         modifier: d.modifier,
         type: d.type
       }));
-      
+
       // Parse conditions
       const conditionRegex = /\{@condition ([^|}]+)(?:\|[^}]*)?\}/g;
       let conditionMatch;
       while ((conditionMatch = conditionRegex.exec(entry))) {
         option.conditions.push(conditionMatch[1].toLowerCase());
       }
-      
+
       // Parse effects/hazards
       const hazardMatch = entry.match(/\{@hazard ([^|}]+)(?:\|[^}]*)?\}/);
       if (hazardMatch) {
@@ -717,14 +884,55 @@ function parseActionOption(item) {
       }
     }
   }
-  
+
   return option;
 }
 
+// Fix 2: Update parseSpeed to handle conditions in a standardized way
+function parseSpeed(speed) {
+  if (!speed) return {};
+  
+  const parsedSpeed = {};
+  
+  Object.keys(speed).forEach(key => {
+    const value = speed[key];
+    
+    if (typeof value === 'number') {
+      // Simple numeric speeds stay as numbers
+      parsedSpeed[key] = value;
+    } else if (typeof value === 'boolean') {
+      // Boolean properties like canHover get preserved
+      parsedSpeed[key] = value;
+    } else if (typeof value === 'object' && value.number) {
+      // Handle complex speed objects - extract the number
+      parsedSpeed[key] = value.number;
+      
+      if (value.condition) {
+        // Clean any {@item} or other tags from the condition
+        const cleanCondition = value.condition
+          .replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+          .replace(/\{@[^}]+\}/g, '')
+          .trim();
+        
+        // Store the condition in a standardized speedConditions object
+        if (!parsedSpeed.speedConditions) {
+          parsedSpeed.speedConditions = {};
+        }
+        parsedSpeed.speedConditions[key] = cleanCondition;
+      }
+    } else {
+      // Pass through other values as-is
+      parsedSpeed[key] = value;
+    }
+  });
+  
+  return parsedSpeed;
+}
+// Fix: Update bonus action parsing to clean {@quickref} tags in bonus action names
 function parseSpecialActions(rawActions) {
   return rawActions
-    .filter(a => 
-      (!a.entries?.[0] || (!/\{@atk/.test(a.entries[0]) && !/\{@hit /.test(a.entries[0]))) && 
+    .filter(a =>
+      (!a.entries?.[0] || (!/\{@atk/.test(a.entries[0]) && !/\{@hit /.test(a.entries[0]))) &&
       !a.name.toLowerCase().includes("multiattack")
     )
     .map(a => {
@@ -740,28 +948,56 @@ function parseSpecialActions(rawActions) {
 
       const parsedAction = parseComplexAction(a);
       const entry = a.entries?.[0] || '';
-      
+
       // Parse damage from the entry text
       const damage = extractDamageFromText(entry);
-      
+
       // Parse healing from the entry text
       const healing = extractHealingFromText(entry);
-      
+
       // Combine damage and healing into a single array for consistency
       const allDice = [...damage, ...healing];
-      
+
       // Parse components for special actions (save DC, damage, etc.)
       const components = parseSpecialActionComponents(entry);
-      
+
+      // Clean the action name using the same logic as cleanComplexText
+      let cleanName = a.name;
+      if (cleanName) {
+        cleanName = cleanName
+          // Handle {@quickref} tags in names
+          .replace(/\{@quickref ([^|}]+)(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, text, displayText) => {
+            return displayText || text;
+          })
+          // Handle recharge tags
+          .replace(/\{@recharge[^}]*\}/g, '')
+          // Remove usage patterns but preserve them for parsing above
+          .replace(/\s*\([^)]*\)/g, (match) => {
+            // Keep usage patterns like (1/Day) but remove other parenthetical content that was parsed from tags
+            if (usageMatch && match.includes(usageMatch[0])) {
+              return match;
+            }
+            // Remove parenthetical content that came from {@quickref} or other tags
+            if (match.includes('Recharges after') || match.includes('recharges after')) {
+              return match; // Keep recharge text
+            }
+            return match; // For now, keep all parenthetical content to be safe
+          })
+          // Handle other common tags in names
+          .replace(/\{@[^}]+\}/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
       return {
-        name: a.name.replace(/\s*\{.*?\}/g, '').replace(/\s*\([^)]*\)/g, '').trim(),
+        name: cleanName,
         recharge,
         usage,
         damage: mapDamageData(allDice),
         components,
-        ...(typeof parsedAction === 'string' ? 
-          { text: parsedAction } : 
-          { 
+        ...(typeof parsedAction === 'string' ?
+          { text: parsedAction } :
+          {
             description: parsedAction.description,
             options: parsedAction.options,
             text: parsedAction.description
@@ -773,9 +1009,9 @@ function parseSpecialActions(rawActions) {
 
 function parseSpecialActionComponents(entry) {
   if (!entry) return {};
-  
+
   const components = {};
-  
+
   // Parse save type and DC
   const saveMatch = entry.match(/\{@actSave (con|str|dex|int|wis|cha)\}/);
   if (saveMatch) {
@@ -786,29 +1022,29 @@ function parseSpecialActionComponents(entry) {
     components.saveType = saveMatch[1];
     components.saveAbility = `${abilityNames[saveMatch[1]]} Saving Throw`;
   }
-  
+
   const dcMatch = entry.match(/\{@dc (\d+)\}/);
   if (dcMatch) {
     components.saveDC = parseInt(dcMatch[1]);
   }
-  
+
   // Parse area effects
   const areaMatch = entry.match(/(\d+)-foot(?:-radius)?\s+\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^}]*)?\}/);
   if (areaMatch) {
     components.areaSize = areaMatch[1] + '-foot';
     components.areaType = areaMatch[2].toLowerCase().trim();
   }
-  
+
   // Parse damage using shared utility
   const damageData = extractDamageFromText(entry);
   if (damageData.length > 0) {
     components.damage = damageData.map(d => ({
-    average: calculateAverageDamage(d),
-    formula: `${d.dieCount}d${d.die}${d.modifier ? ` + ${d.modifier}` : ''}`,
-    type: d.type
+      average: calculateAverageDamage(d),
+      formula: `${d.dieCount}d${d.die}${d.modifier ? ` + ${d.modifier}` : ''}`,
+      type: d.type
     }));
   }
-  
+
   // Parse conditions
   const conditionRegex = /\{@condition ([^|}]+)(?:\|[^}]*)?\}/g;
   const conditions = [];
@@ -819,17 +1055,24 @@ function parseSpecialActionComponents(entry) {
   if (conditions.length > 0) {
     components.conditions = conditions;
   }
-  
+
   return components;
 }
 
+// Fix: Update parseSpellcasting to clean headerEntries text properly
 function parseSpellcasting(raw) {
   if (!raw.spellcasting) return null;
 
   return raw.spellcasting.map(sc => {
     const parsed = {
       name: sc.name ? sc.name.replace(/\s*\{@recharge[^}]*\}/g, '').trim() : "Spellcasting",
-      headerEntries: (sc.headerEntries || []).map(entry => cleanComplexText(entry)),
+      // UPDATED: Clean headerEntries using cleanComplexText and fix whitespace
+      headerEntries: (sc.headerEntries || []).map(entry => {
+        return cleanComplexText(entry)
+          .replace(/\s+/g, ' ')        // Normalize whitespace
+          .replace(/\s+([.!?])/g, '$1') // Remove spaces before punctuation
+          .trim();
+      }),
       ability: sc.ability || null,
       displayAs: sc.displayAs || null,
       spells: {}
@@ -840,7 +1083,7 @@ function parseSpellcasting(raw) {
       parsed.spells.recharge = {};
       Object.keys(sc.recharge).forEach(rechargeNum => {
         parsed.spells.recharge[rechargeNum] = sc.recharge[rechargeNum].map(spell => 
-          spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+          cleanSpellEntry(spell)
         );
       });
       
@@ -851,37 +1094,22 @@ function parseSpellcasting(raw) {
       }
     }
 
-    // Parse other spell categories
+    // Parse other spell categories using the helper
     if (sc.will) {
-        parsed.spells.will = sc.will.map(spell => {
-            const cleaned = spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                .replace(/\\"/g, '"');
-
-            return cleaned;
-        });
+      parsed.spells.will = sc.will.map(spell => cleanSpellEntry(spell));
     }
     
     if (sc.daily) {
       parsed.spells.daily = {};
       Object.keys(sc.daily).forEach(freq => {
-        parsed.spells.daily[freq] = sc.daily[freq].map(spell => 
-          spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-               .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-               .replace(/\(\{@dice ([^}]+)\}\)/g, '($1)')
-                .replace(/\{@dice ([^}]+)\}/g, '$1')
-                .replace(/\\"/g, '"')
-        );
+        parsed.spells.daily[freq] = sc.daily[freq].map(spell => cleanSpellEntry(spell));
       });
     }
     
     if (sc.restLong) {
       parsed.spells.restLong = {};
       Object.keys(sc.restLong).forEach(freq => {
-        parsed.spells.restLong[freq] = sc.restLong[freq].map(spell => 
-          spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-          .replace(/\\"/g, '"')
-        );
+        parsed.spells.restLong[freq] = sc.restLong[freq].map(spell => cleanSpellEntry(spell));
       });
     }
     
@@ -891,24 +1119,27 @@ function parseSpellcasting(raw) {
         if (!parsed.spells.leveled) parsed.spells.leveled = {};
         parsed.spells.leveled[level] = {
           ...sc.spells[level],
-          spells: sc.spells[level].spells.map(spell => 
-            spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                .replace(/\\"/g, '"')
-            )
+          spells: sc.spells[level].spells.map(spell => cleanSpellEntry(spell))
         };
       });
     }
 
     // Add footer entries if they exist
     if (sc.footerEntries) {
-      parsed.footerEntries = sc.footerEntries.map(entry => cleanComplexText(entry));
+      // UPDATED: Clean footerEntries using cleanComplexText and fix whitespace
+      parsed.footerEntries = sc.footerEntries.map(entry => {
+        return cleanComplexText(entry)
+          .replace(/\s+/g, ' ')        // Normalize whitespace
+          .replace(/\s+([.!?])/g, '$1') // Remove spaces before punctuation
+          .trim();
+      });
     }
 
     return parsed;
   });
 }
 
-// Helper function to format spells for trait display
+// Also update formatSpellsForTrait to handle whitespace better
 function formatSpellsForTrait(spells) {
   const parts = [];
   
@@ -927,11 +1158,14 @@ function formatSpellsForTrait(spells) {
         count = freq === '1' ? 'once per day' : `${freq} times per day`;
       }
       
-      // Clean any {@dice} tags from spells in the daily list
-     const cleanSpells = spells.daily[freq].map(spell => 
+      // Clean any {@dice} tags from spells in the daily list and fix whitespace
+      const cleanSpells = spells.daily[freq].map(spell => 
         spell.replace(/\(\{@dice ([^}]+)\}\)/g, '($1)')  // Handle ({@dice ...})
             .replace(/\{@dice ([^}]+)\}/g, '$1')        // Handle {@dice ...}
             .replace(/\\"/g, '"')                       // Handle escaped quotes
+            .replace(/\s+/g, ' ')                       // Normalize whitespace
+            .replace(/\s+([.!?])/g, '$1')               // Remove spaces before punctuation
+            .trim()
         );
             
       parts.push(`${count}: ${cleanSpells.join(', ')}`);
@@ -939,20 +1173,30 @@ function formatSpellsForTrait(spells) {
   }
   
   if (spells.leveled) {
-  Object.keys(spells.leveled).sort((a, b) => parseInt(a) - parseInt(b)).forEach(level => {
-    const levelData = spells.leveled[level];
-    if (level === '0') {
-      // Handle cantrips
-      const cleanSpells = levelData.spells.map(spell => spell.replace(/\\"/g, '"'));
+    Object.keys(spells.leveled).sort((a, b) => parseInt(a) - parseInt(b)).forEach(level => {
+      const levelData = spells.leveled[level];
+      if (level === '0') {
+        // Handle cantrips
+        const cleanSpells = levelData.spells.map(spell => 
+          spell.replace(/\\"/g, '"')
+               .replace(/\s+/g, ' ')
+               .replace(/\s+([.!?])/g, '$1')
+               .trim()
+        );
         parts.push(`Cantrips (at will): ${cleanSpells.join(', ')}`);
-    } else {
-      // Handle regular spell levels
-      const ordinal = level === '1' ? '1st' : level === '2' ? '2nd' : level === '3' ? '3rd' : `${level}th`;
-      const cleanSpells = levelData.spells.map(spell => spell.replace(/\\"/g, '"'));
+      } else {
+        // Handle regular spell levels
+        const ordinal = level === '1' ? '1st' : level === '2' ? '2nd' : level === '3' ? '3rd' : `${level}th`;
+        const cleanSpells = levelData.spells.map(spell => 
+          spell.replace(/\\"/g, '"')
+               .replace(/\s+/g, ' ')
+               .replace(/\s+([.!?])/g, '$1')
+               .trim()
+        );
         parts.push(`${ordinal} level (${levelData.slots} slots): ${cleanSpells.join(', ')}`);
-    }
-  });
-}
+      }
+    });
+  }
   
   return parts;
 }
@@ -965,9 +1209,9 @@ function parseLegendaryActions(raw) {
     countLair: raw.legendaryActionsLair || null,
     actions: raw.legendary.map(la => ({
       name: la.name.replace(/\s*\{.*?\}/g, '').trim(),
-      cost: la.name.match(/\(costs (\d+) actions?\)/i) ? 
+      cost: la.name.match(/\(costs (\d+) actions?\)/i) ?
         parseInt(la.name.match(/\(costs (\d+) actions?\)/i)[1]) : 1,
-      text: la.entries?.[0] ? 
+      text: la.entries?.[0] ?
         cleanComplexText(la.entries[0]) : ''
     }))
   };
@@ -977,17 +1221,17 @@ function parseLegendaryActions(raw) {
 // Extract recharge parsing to shared utility function
 function parseRecharge(name) {
   let recharge = null;
-  
+
   // Handle {@recharge N} tags
   const rechargeTagMatch = name.match(/\{@recharge (\d+)\}/);
   if (rechargeTagMatch) {
     const min = parseInt(rechargeTagMatch[1]);
     recharge = { min, max: 6 }; // {@recharge 5} means "Recharge 5-6"
-  } 
+  }
   // Handle {@recharge} without number (defaults to 6)
   else if (name.includes('{@recharge}')) {
     recharge = { min: 6, max: 6 }; // Default to 6 for {@recharge}
-  } 
+  }
   // Handle (Recharge X-Y) format
   else {
     const rechargeMatch = name.match(/\(recharge (\d+)[-–](\d+)\)/i);
@@ -1005,28 +1249,39 @@ function parseRecharge(name) {
       }
     }
   }
-  
+
   return recharge;
 }
 
+// Fix: Update parseReactionComponents to handle text cleaning issues
 function parseReactionComponents(entry) {
   const components = {};
-  
+
   // Parse trigger text (everything before {@actResponse})
   const triggerMatch = entry.match(/\{@actTrigger\}\s*([^{]*?)(?=\{@actResponse|$)/);
   if (triggerMatch) {
     components.trigger = triggerMatch[1].trim();
   }
-  
+
   // Parse response type and saving throw
   if (entry.includes('{@actResponse d}{@actSave dex}')) {
     components.responseType = 'Dexterity Saving Throw';
+  } else if (entry.includes('{@actResponse d}{@actSave str}')) {
+    components.responseType = 'Strength Saving Throw';
+  } else if (entry.includes('{@actResponse d}{@actSave con}')) {
+    components.responseType = 'Constitution Saving Throw';
+  } else if (entry.includes('{@actResponse d}{@actSave int}')) {
+    components.responseType = 'Intelligence Saving Throw';
+  } else if (entry.includes('{@actResponse d}{@actSave wis}')) {
+    components.responseType = 'Wisdom Saving Throw';
+  } else if (entry.includes('{@actResponse d}{@actSave cha}')) {
+    components.responseType = 'Charisma Saving Throw';
   } else {
     const responseMatch = entry.match(/\{@actResponse ([^}]+)\}/);
     if (responseMatch) {
       components.responseType = responseMatch[1];
     }
-    
+
     const saveMatch = entry.match(/\{@actSave (con|str|dex|int|wis|cha)\}/);
     if (saveMatch) {
       const abilityNames = {
@@ -1036,54 +1291,89 @@ function parseReactionComponents(entry) {
       components.responseType = `${abilityNames[saveMatch[1]]} Saving Throw`;
     }
   }
-  
+
   // Parse DC
   const dcMatch = entry.match(/\{@dc (\d+)\}/);
   if (dcMatch) {
     components.dc = parseInt(dcMatch[1]);
   }
-  
+
   // Parse target (text between DC and failure)
   const targetMatch = entry.match(/\{@dc \d+\}[,\s]*([^{]*?)(?=\{@actSaveFail|$)/);
   if (targetMatch) {
     components.target = targetMatch[1].trim().replace(/[,.]$/, '');
   }
-  
-  // Parse failure effect
+
+  // Parse failure effect - UPDATED to handle text cleaning better
   const failureMatch = entry.match(/\{@actSaveFail[^}]*\}\s*(.+)/);
   if (failureMatch) {
-    const failureText = failureMatch[1];
-    
-    // Try to parse damage from failure text
-    const damageMatch = failureText.match(/(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/);
+    let failureText = failureMatch[1];
+
+    // Clean the failure text with better handling
+    failureText = failureText
+      // Handle damage tags - preserve dice notation
+      .replace(/(\d+)\s*\(\{@damage ([^}]+)\}\)/g, '$1 ($2)')
+      // Handle conditions
+      .replace(/\{@condition ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+      // Handle DC references
+      .replace(/\{@dc (\d+)\}/g, 'DC $1')
+      // Handle skills
+      .replace(/\{@skill ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+      // Handle variant rules with proper text extraction
+      .replace(/\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, rule, displayText) => {
+        // If there's a display text after the second |, use that, otherwise use the rule name
+        return displayText || rule;
+      })
+      // Handle any remaining tags
+      .replace(/\{@[^}]+\}/g, '')
+      // Clean up whitespace
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // Try to parse damage from failure text (this should now work better)
+    const damageMatch = failureText.match(/(\d+)\s*\(([^)]+)\)\s+([A-Za-z]+)\s+damage/);
     if (damageMatch) {
       components.failureDamageAverage = parseInt(damageMatch[1]);
       components.failureDamageFormula = damageMatch[2].trim();
       components.failureDamageType = damageMatch[3].toLowerCase() + ' damage';
     } else {
-      // If no specific damage pattern, just clean the text
-      components.failureEffect = failureText
-        .replace(/\{@damage ([^}]+)\}/g, '$1')
-        .replace(/\{@[^}]+\}/g, '')
-        .trim();
+      // Store the cleaned failure effect
+      components.failureEffect = failureText;
     }
   }
-  
+
   return components;
 }
 
+// Fix: Update parseReactions to clean {@quickref} tags in reaction names
 function parseReactions(raw) {
   if (!raw.reaction) return [];
-  
+
   return raw.reaction.map(r => {
     const entry = r.entries?.[0] || '';
+
+    // Clean the reaction name using the same logic as cleanComplexText
+    let cleanName = r.name;
+    if (cleanName) {
+      cleanName = cleanName
+        // Handle {@quickref} tags in names
+        .replace(/\{@quickref ([^|}]+)(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, text, displayText) => {
+          return displayText || text;
+        })
+        // Handle other common tags in names
+        .replace(/\{@recharge[^}]*\}/g, '')
+        .replace(/\{@[^}]+\}/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
     return {
-        name: r.name.replace(/\s*\{.*?\}/g, '').trim(),
-        damage: mapDamageData(extractDamageFromText(entry)), // ADD THIS LINE
-        components: parseReactionComponents(entry),
-        text: entry ? cleanComplexText(entry) : ''
-        };
-    });
+      name: cleanName,
+      damage: mapDamageData(extractDamageFromText(entry)),
+      components: parseReactionComponents(entry),
+      text: entry ? cleanComplexText(entry) : ''
+    };
+  });
 }
 
 function mapDamageData(damageArray) {
@@ -1097,6 +1387,7 @@ function mapDamageData(damageArray) {
   }));
 }
 
+// Fix: Update mapCreature to clean {@creature} tags from languages array
 function mapCreature(raw, id = null) {
   const dexMod = raw.dex != null ? calculateModifier(raw.dex) : null;
 
@@ -1120,6 +1411,13 @@ function mapCreature(raw, id = null) {
       ].join(' ').replace(/\\"/g, '"')
     })) : [];
 
+  // Extract CR value properly from both simple and complex formats
+  let crValue = raw.cr;
+  if (typeof raw.cr === 'object' && raw.cr !== null) {
+    // Handle complex CR objects like {"cr": "0", "xp": 0}
+    crValue = raw.cr.cr || raw.cr.rating || raw.cr.value || raw.cr;
+  }
+
   return {
     // Basic Info
     id,
@@ -1132,7 +1430,7 @@ function mapCreature(raw, id = null) {
     alignment: parseAlignment(raw.alignment, raw.alignmentPrefix),
     source: raw.source,
     page: raw.page,
-    otherSources: parseOtherSources(raw), // Add this
+    otherSources: parseOtherSources(raw),
     srd52: raw.srd52 || false,
     basicRules2024: raw.basicRules2024 || false,
     dragonAge: raw.dragonAge || null,
@@ -1141,19 +1439,30 @@ function mapCreature(raw, id = null) {
     // Combat Stats
     ac: parseAC(raw.ac),
     hp: parseHP(raw.hp),
-    speed: raw.speed || {},
-    cr: raw.cr,
-    pb: calculateProficiencyBonus(raw.cr),
+    speed: parseSpeed(raw.speed),
+    cr: crValue,
+    pb: calculateProficiencyBonus(crValue),
     initiative: calculateInitiative(dexMod),
 
     // Abilities & Skills
     abilities: parseAbilities(raw),
     skills: parseSkills(raw),
     senses: parseSenses(raw),
-    languages: raw.languages || [],
+    // UPDATED: Clean {@creature} and other tags from languages
+    languages: (raw.languages || []).map(lang => {
+      if (typeof lang === 'string') {
+        return lang
+          .replace(/\{@creature ([^|}]+)\|[^|}]*\|([^}]+)\}/g, '$2')  // Handle {@creature Name|Source|DisplayName}
+          .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')       // Handle {@creature Name|Source}
+          .replace(/\{@[^}]+\}/g, '')                                 // Clean any other tags
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      return lang;
+    }),
 
     // Equipment
-    gear: parseGear(raw), // Add this
+    gear: parseGear(raw),
 
     // Resistances/Immunities
     vulnerabilities: parseResistances(raw, 'vulnerable'),
@@ -1183,7 +1492,7 @@ function mapCreature(raw, id = null) {
             cleanComplexText(t.entries[0]) : ''
         };
       }
-    }).concat(spellcastingTraits), // Only add non-action spellcasting to traits
+    }).concat(spellcastingTraits),
     
     actions: {
       multiAttack: parseMultiAttack(raw.action || []),
@@ -1204,8 +1513,22 @@ function mapCreature(raw, id = null) {
     
     bonusActions: (raw.bonus || []).map(ba => {
       const entry = ba.entries?.[0] || '';
+      
+      // Clean the bonus action name
+      let cleanName = ba.name;
+      if (cleanName) {
+        cleanName = cleanName
+          .replace(/\{@quickref ([^|}]+)(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, text, displayText) => {
+            return displayText || text;
+          })
+          .replace(/\{@recharge[^}]*\}/g, '')
+          .replace(/\{@[^}]+\}/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      
       return {
-        name: ba.name.replace(/\s*\{.*?\}/g, '').trim(),
+        name: cleanName,
         damage: mapDamageData(extractDamageFromText(entry)),
         components: parseSpecialActionComponents(entry),
         text: ba.entries?.[0] ? 
