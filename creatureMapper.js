@@ -30,7 +30,6 @@ function calculateModifier(score) {
   return Math.floor((score - 10) / 2);
 }
 
-// Fix: Update parseAbilities to handle saving throws from the "save" property
 function parseAbilities(raw) {
   const keys = ["str", "dex", "con", "int", "wis", "cha"];
   const saves = raw.save || {}; // Get the save object from raw data
@@ -45,6 +44,9 @@ function parseAbilities(raw) {
       // Convert "+7" format to just 7, or handle plain numbers
       const saveStr = String(saves[key]);
       saveValue = saveStr.startsWith('+') ? parseInt(saveStr.slice(1)) : parseInt(saveStr);
+    } else {
+      // Use base modifier instead of null when no save proficiency
+      saveValue = value != null ? calculateModifier(value) : null;
     }
 
     abilities[key] = {
@@ -136,14 +138,14 @@ function parseType(type) {
   if (typeof type === 'string') return type;
   if (typeof type === 'object') {
     let base = '';
-    
+
     // Handle nested type structure like {"type": {"choose": ["celestial", "fiend"]}}
     if (type.type && typeof type.type === 'object' && type.type.choose) {
       base = type.type.choose.join(' or ');
     } else if (type.type) {
       base = type.type;
     }
-    
+
     let tags = '';
     if (type.tags && Array.isArray(type.tags)) {
       const tagStrings = type.tags.map(tag => {
@@ -156,19 +158,19 @@ function parseType(type) {
       });
       tags = ` (${tagStrings.join(', ')})`;
     }
-    
+
     // Handle swarm types - add swarmSize information
     if (type.swarmSize) {
       const sizeMap = {
         'T': 'Tiny',
-        'S': 'Small', 
+        'S': 'Small',
         'M': 'Medium',
         'L': 'Large',
         'H': 'Huge',
         'G': 'Gargantuan'
       };
       const swarmSizeName = sizeMap[type.swarmSize] || type.swarmSize;
-      
+
       // If we already have tags, add swarm info to them
       if (tags) {
         tags = ` (swarm of ${swarmSizeName}, ${tags.slice(2, -1)})`;
@@ -176,7 +178,7 @@ function parseType(type) {
         tags = ` (swarm of ${swarmSizeName})`;
       }
     }
-    
+
     return base + tags;
   }
   return null;
@@ -258,7 +260,7 @@ function parseMultiAttack(rawActions) {
     .filter(a => !a.name.toLowerCase().includes("multiattack"))
     .map(a => a.name.replace(/\s*\{.*?\}/g, '').trim());
 
-  const mentioned = allAttacks.filter(name => 
+  const mentioned = allAttacks.filter(name =>
     text.toLowerCase().includes(name.toLowerCase())
   );
 
@@ -442,43 +444,43 @@ function cleanSpellEntry(spell) {
   // Handle string spells
   if (typeof spell === 'string') {
     return spell.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                .replace(/\{@damage ([^}]+)\}/g, '$1')
-                .replace(/\{@dice ([^}]+)\}/g, '$1')
-                .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
-                .replace(/\\"/g, '"');
+      .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+      .replace(/\{@damage ([^}]+)\}/g, '$1')
+      .replace(/\{@dice ([^}]+)\}/g, '$1')
+      .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+      .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
+      .replace(/\\"/g, '"');
   }
-  
+
   // Handle object spells with entry property
   if (typeof spell === 'object' && spell !== null) {
     if (spell.entry) {
       return spell.entry.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                        .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                        .replace(/\{@damage ([^}]+)\}/g, '$1')
-                        .replace(/\{@dice ([^}]+)\}/g, '$1')
-                        .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                        .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
-                        .replace(/\\"/g, '"');
+        .replace(/\{@variantrule ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+        .replace(/\{@damage ([^}]+)\}/g, '$1')
+        .replace(/\{@dice ([^}]+)\}/g, '$1')
+        .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+        .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
+        .replace(/\\"/g, '"');
     }
     // Handle other potential object structures
     if (spell.name) {
       return spell.name.replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                       .replace(/\{@damage ([^}]+)\}/g, '$1')
-                       .replace(/\{@dice ([^}]+)\}/g, '$1')
-                       .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-                       .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
-                       .replace(/\\"/g, '"');
+        .replace(/\{@damage ([^}]+)\}/g, '$1')
+        .replace(/\{@dice ([^}]+)\}/g, '$1')
+        .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+        .replace(/\s*\*\s*$/g, '')  // ADD: Remove trailing asterisks
+        .replace(/\\"/g, '"');
     }
     console.log('Unknown spell object structure:', JSON.stringify(spell, null, 2));
     return 'Unknown Spell';
   }
-  
+
   // Fallback for other types
   return String(spell);
 }
 
-// Fix: Update cleanComplexText to handle {@filter} tags
+// Fix: Update cleanComplexText to include whitespace cleanup
 function cleanComplexText(text) {
   let result = text;
 
@@ -500,35 +502,41 @@ function cleanComplexText(text) {
     .replace(/\{@action [^|}]+(?:\|[^|}]+)?\|([^}]+)\}/g, '$1')
     .replace(/\{@action ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@condition ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    // Handle {@skill} followed by {@skillCheck} pattern
+    .replace(/\{@skill ([^}]+)\}\s*\{@skillCheck [^}]*\s+(\d+)\}/g, '$1 +$2')
     .replace(/\{@skill ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    .replace(/\{@skillCheck ([^}]+)\}/g, '$1')
     .replace(/\{@creature ([^|}]+)\|[^|}]*\|([^}]+)\}/g, '$2')
     .replace(/\{@creature ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@spell ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@sense ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
-    .replace(/\{@filter ([^|}]+)(?:\|[^}]*)?\}/g, '$1')  // ADD: Handle {@filter} tags
-    // UPDATED: Handle complex {@status} tags with || separator
-    .replace(/\{@status ([^|}]+)\|\|([^}]+)\}/g, '$2')  // Use display text after ||
-    .replace(/\{@status ([^|}]+)(?:\|[^}]*)?\}/g, '$1')  // Regular {@status} tags
-    // UPDATED: Better handling of variant rules with display text
+    .replace(/\{@filter ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    // Handle {@adventure} tags - extract the display name (last part after final |)
+    .replace(/\{@adventure ([^|}]+)\|([^|}]+)\|([^|}]+)\|([^}]+)\}/g, '$4')  // 4-part adventure tag
+    .replace(/\{@adventure ([^|}]+)\|([^|}]+)\|([^}]+)\}/g, '$3')           // 3-part adventure tag
+    .replace(/\{@adventure ([^|}]+)\|([^}]+)\}/g, '$2')                     // 2-part adventure tag
+    .replace(/\{@adventure ([^|}]+)\}/g, '$1')                              // Single-part adventure tag
+    // Handle complex {@status} tags with || separator
+    .replace(/\{@status ([^|}]+)\|\|([^}]+)\}/g, '$2')
+    .replace(/\{@status ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    // Better handling of variant rules with display text
     .replace(/\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, rule, displayText) => {
-      // If there's a display text after the second |, use that, otherwise use the rule name
       return displayText || rule;
     })
-    // UPDATED: Better {@quickref} handling - more flexible parameter parsing
+    // Better {@quickref} handling
     .replace(/\{@quickref ([^|}]+)(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, text, displayText) => {
-      // If there's display text (last parameter), use that, otherwise use the main text
       return displayText || text;
     })
     .replace(/\{@actTrigger\}/g, 'Trigger:')
-    // Handle specific response + save combinations FIRST (more specific patterns)
+    // Handle specific response + save combinations FIRST
     .replace(/\{@actResponse d\}\{@actSave dex\}/g, 'Response—Dexterity Saving Throw:')
     .replace(/\{@actResponse d\}\{@actSave str\}/g, 'Response—Strength Saving Throw:')
     .replace(/\{@actResponse d\}\{@actSave con\}/g, 'Response—Constitution Saving Throw:')
     .replace(/\{@actResponse d\}\{@actSave int\}/g, 'Response—Intelligence Saving Throw:')
     .replace(/\{@actResponse d\}\{@actSave wis\}/g, 'Response—Wisdom Saving Throw:')
     .replace(/\{@actResponse d\}\{@actSave cha\}/g, 'Response—Charisma Saving Throw:')
-    // Handle remaining individual patterns (less specific, so they come after)
+    // Handle remaining individual patterns
     .replace(/\{@actResponse ([^}]+)\}/g, (match, response) => {
       if (response === 'd') return 'Response—Saving Throw:';
       return `Response—${response}:`;
@@ -548,7 +556,8 @@ function cleanComplexText(text) {
     .replace(/\{@actSaveSuccess\}/g, 'Success:')
     .replace(/\{@actSaveSuccessOrFail\}/g, 'Failure or Success:')
     .replace(/\{@[^}]+\}/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/\s+/g, ' ')          // ADD: Normalize whitespace
+    .replace(/\s+([.!?])/g, '$1')  // ADD: Remove spaces before punctuation
     .replace(/^[,\s]+/, '')
     .replace(/\\"/g, '"')
     .trim();
@@ -714,7 +723,7 @@ function parseAttackComponents(entry) {
   return components;
 }
 
-// Fix 4: Update the Longbow range parsing in parseAttacks
+// Fix 1: Update parseAttacks to handle "range X ft" format (not just "ranged X ft")
 function parseAttacks(rawActions) {
   return rawActions
     .filter(a => a.entries?.[0] && (/\{@atk/.test(a.entries[0]) || /\{@hit /.test(a.entries[0])))
@@ -723,8 +732,8 @@ function parseAttacks(rawActions) {
       const hitMatch = entry.match(/\{@hit ([-+]?\d+)/);
       const attackModifier = hitMatch ? parseInt(hitMatch[1]) : null;
 
-      // Parse range - UPDATED to handle "ranged X/Y ft" format
-      const rangeMatch = entry.match(/ranged (\d+)(?:\/(\d+))?\s*ft/i);
+      // FIXED: Parse range - handle both "range X ft" and "ranged X/Y ft" formats
+      const rangeMatch = entry.match(/range (\d+)(?:\/(\d+))?\s*ft/i) || entry.match(/ranged (\d+)(?:\/(\d+))?\s*ft/i);
       const reachMatch = entry.match(/reach (\d+)\s*ft/i);
 
       const range = rangeMatch ? {
@@ -891,12 +900,12 @@ function parseActionOption(item) {
 // Fix 2: Update parseSpeed to handle conditions in a standardized way
 function parseSpeed(speed) {
   if (!speed) return {};
-  
+
   const parsedSpeed = {};
-  
+
   Object.keys(speed).forEach(key => {
     const value = speed[key];
-    
+
     if (typeof value === 'number') {
       // Simple numeric speeds stay as numbers
       parsedSpeed[key] = value;
@@ -906,14 +915,14 @@ function parseSpeed(speed) {
     } else if (typeof value === 'object' && value.number) {
       // Handle complex speed objects - extract the number
       parsedSpeed[key] = value.number;
-      
+
       if (value.condition) {
         // Clean any {@item} or other tags from the condition
         const cleanCondition = value.condition
           .replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
           .replace(/\{@[^}]+\}/g, '')
           .trim();
-        
+
         // Store the condition in a standardized speedConditions object
         if (!parsedSpeed.speedConditions) {
           parsedSpeed.speedConditions = {};
@@ -925,10 +934,9 @@ function parseSpeed(speed) {
       parsedSpeed[key] = value;
     }
   });
-  
+
   return parsedSpeed;
 }
-// Fix: Update bonus action parsing to clean {@quickref} tags in bonus action names
 function parseSpecialActions(rawActions) {
   return rawActions
     .filter(a =>
@@ -939,11 +947,16 @@ function parseSpecialActions(rawActions) {
       // Parse recharge using shared utility
       const recharge = parseRecharge(a.name);
 
-      // Parse usage limits like (1/Day)
+      // Parse usage limits like (1/Day) - FIXED: Clean {@quickref} tags from period
       const usageMatch = a.name.match(/\((\d+)\/([^)]+)\)/);
       const usage = usageMatch ? {
         count: parseInt(usageMatch[1]),
         period: usageMatch[2].toLowerCase()
+          // Clean {@quickref} tags from the period
+          .replace(/\{@quickref ([^|}]+)(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|[^|}]*)?(?:\|([^}]+))?\}/g, (match, text, displayText) => {
+            return displayText || text;
+          })
+          .trim()
       } : null;
 
       const parsedAction = parseComplexAction(a);
@@ -1082,11 +1095,11 @@ function parseSpellcasting(raw) {
     if (sc.recharge) {
       parsed.spells.recharge = {};
       Object.keys(sc.recharge).forEach(rechargeNum => {
-        parsed.spells.recharge[rechargeNum] = sc.recharge[rechargeNum].map(spell => 
+        parsed.spells.recharge[rechargeNum] = sc.recharge[rechargeNum].map(spell =>
           cleanSpellEntry(spell)
         );
       });
-      
+
       const rechargeKeys = Object.keys(sc.recharge);
       if (rechargeKeys.length === 1 && rechargeKeys[0] !== '1') {
         const rechargeNum = rechargeKeys[0];
@@ -1098,21 +1111,21 @@ function parseSpellcasting(raw) {
     if (sc.will) {
       parsed.spells.will = sc.will.map(spell => cleanSpellEntry(spell));
     }
-    
+
     if (sc.daily) {
       parsed.spells.daily = {};
       Object.keys(sc.daily).forEach(freq => {
         parsed.spells.daily[freq] = sc.daily[freq].map(spell => cleanSpellEntry(spell));
       });
     }
-    
+
     if (sc.restLong) {
       parsed.spells.restLong = {};
       Object.keys(sc.restLong).forEach(freq => {
         parsed.spells.restLong[freq] = sc.restLong[freq].map(spell => cleanSpellEntry(spell));
       });
     }
-    
+
     if (sc.spells) {
       // Handle leveled spells - clean the spell names
       Object.keys(sc.spells).forEach(level => {
@@ -1139,7 +1152,7 @@ function parseSpellcasting(raw) {
   });
 }
 
-// Also update formatSpellsForTrait to handle whitespace better
+// Fix 3: Update formatSpellsForTrait to fix spacing and singular/plural slots
 function formatSpellsForTrait(spells) {
   const parts = [];
   
@@ -1185,22 +1198,23 @@ function formatSpellsForTrait(spells) {
         );
         parts.push(`Cantrips (at will): ${cleanSpells.join(', ')}`);
       } else {
-        // Handle regular spell levels
+        // FIXED: Handle regular spell levels with proper singular/plural and formatting
         const ordinal = level === '1' ? '1st' : level === '2' ? '2nd' : level === '3' ? '3rd' : `${level}th`;
+        const slotText = levelData.slots === 1 ? 'slot' : 'slots';
         const cleanSpells = levelData.spells.map(spell => 
           spell.replace(/\\"/g, '"')
                .replace(/\s+/g, ' ')
                .replace(/\s+([.!?])/g, '$1')
                .trim()
         );
-        parts.push(`${ordinal} level (${levelData.slots} slots): ${cleanSpells.join(', ')}`);
+        parts.push(`${ordinal} level (${levelData.slots} ${slotText}): ${cleanSpells.join(', ')}`);
       }
     });
   }
   
-  return parts;
+  // FIXED: Add proper spacing between spell level groups
+  return parts.join(' ');
 }
-
 function parseLegendaryActions(raw) {
   if (!raw.legendary) return null;
 
@@ -1393,20 +1407,20 @@ function mapCreature(raw, id = null) {
 
   // Parse spellcasting first to check for bonus action spells
   const spellcasting = parseSpellcasting(raw);
-  const bonusActionSpells = spellcasting ? 
+  const bonusActionSpells = spellcasting ?
     spellcasting.filter(sc => sc.displayAs === 'bonus') : [];
-  const reactionSpells = spellcasting ? 
+  const reactionSpells = spellcasting ?
     spellcasting.filter(sc => sc.displayAs === 'reaction') : [];
-  const actionSpells = spellcasting ? 
+  const actionSpells = spellcasting ?
     spellcasting.filter(sc => sc.displayAs === 'action') : [];
-  
+
   // Convert only non-action spellcasting to traits for display
-  const spellcastingTraits = spellcasting ? 
+  const spellcastingTraits = spellcasting ?
     spellcasting.filter(sc => !sc.displayAs || sc.displayAs === null).map(sc => ({
       name: sc.name,
       text: [
         ...sc.headerEntries,
-        ...formatSpellsForTrait(sc.spells),
+        formatSpellsForTrait(sc.spells),
         ...(sc.footerEntries || [])
       ].join(' ').replace(/\\"/g, '"')
     })) : [];
@@ -1473,10 +1487,10 @@ function mapCreature(raw, id = null) {
     // Features & Actions
     traits: (raw.trait || []).map(t => {
       // Check if this trait has complex nested structure like Lordly Presence
-      const hasNestedList = t.entries?.some(entry => 
+      const hasNestedList = t.entries?.some(entry =>
         typeof entry === 'object' && entry.type === 'list'
       );
-      
+
       if (hasNestedList) {
         const structuredTrait = parseStructuredAction(t);
         return {
@@ -1488,12 +1502,12 @@ function mapCreature(raw, id = null) {
       } else {
         return {
           name: t.name.replace(/\s*\{.*?\}/g, '').trim(),
-          text: t.entries?.[0] ? 
+          text: t.entries?.[0] ?
             cleanComplexText(t.entries[0]) : ''
         };
       }
     }).concat(spellcastingTraits),
-    
+
     actions: {
       multiAttack: parseMultiAttack(raw.action || []),
       attacks: parseAttacks(raw.action || []),
@@ -1503,17 +1517,17 @@ function mapCreature(raw, id = null) {
           name: sc.name,
           text: [
             ...sc.headerEntries,
-            ...formatSpellsForTrait(sc.spells),
+            formatSpellsForTrait(sc.spells),
             ...(sc.footerEntries || [])
           ].join(' '),
           spellcasting: true
         }))
       )
     },
-    
+
     bonusActions: (raw.bonus || []).map(ba => {
       const entry = ba.entries?.[0] || '';
-      
+
       // Clean the bonus action name
       let cleanName = ba.name;
       if (cleanName) {
@@ -1526,12 +1540,12 @@ function mapCreature(raw, id = null) {
           .replace(/\s+/g, ' ')
           .trim();
       }
-      
+
       return {
         name: cleanName,
         damage: mapDamageData(extractDamageFromText(entry)),
         components: parseSpecialActionComponents(entry),
-        text: ba.entries?.[0] ? 
+        text: ba.entries?.[0] ?
           cleanComplexText(ba.entries[0]) : ''
       };
     }).concat(
@@ -1540,30 +1554,29 @@ function mapCreature(raw, id = null) {
         name: sc.name,
         text: [
           ...sc.headerEntries,
-          ...formatSpellsForTrait(sc.spells),
+          formatSpellsForTrait(sc.spells),
           ...(sc.footerEntries || [])
         ].join(' '),
         spellcasting: true,
         recharge: sc.spells.recharge ? Object.keys(sc.spells.recharge)[0] : null
       }))
     ),
-    
+
     reactions: parseReactions(raw).concat(
       // Add reaction spellcasting
       reactionSpells.map(sc => ({
         name: sc.name,
         text: [
           ...sc.headerEntries,
-          ...formatSpellsForTrait(sc.spells),
+          formatSpellsForTrait(sc.spells),
           ...(sc.footerEntries || [])
         ].join(' '),
         spellcasting: true
       }))
     ),
-    
+
     legendary: parseLegendaryActions(raw),
-    spellcasting: spellcasting ? 
-        spellcasting.filter(sc => sc.displayAs !== 'bonus' && sc.displayAs !== 'reaction') : null,
+    spellcasting: spellcasting || null,
 
     // Additional Data
     environment: raw.environment || [],

@@ -12,7 +12,8 @@ function validateCreatureData(creature) {
     'Space Dot': /\s\./g,
     'Unknown': /Unknown/g,
     'Asterisks': /\*/g,
-    'Empty Parens': /\(\s*\)/g
+    'Empty Parens': /\(\s*\)/g,
+    'Sequential Spaces': /\w\s{2,}\w/g
   };
 
   function checkStringValue(value, path) {
