@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from 'fs';
-import mapCreature from './creatureMapper.js'; // adjust path as needed
+import mapCreature from './src/utils/creatureMapper.js'; // adjust path as needed
 
 // Validation function to check for common parsing issues
 function validateCreatureData(creature) {
@@ -98,7 +98,7 @@ const mappedCreatures = rawCreatures.map((creature, i) => {
 // Validate the mapped creatures
 const validation = validateCreatureCollection(mappedCreatures);
 
-writeFileSync('./MappedCreatures.json', JSON.stringify(mappedCreatures, null, 2));
+writeFileSync('./MappedCreaturesV2.json', JSON.stringify(mappedCreatures, null, 2));
 console.log(`✅ Mapped ${mappedCreatures.length} creatures to MappedCreatures.json`);
 
 // Show validation results

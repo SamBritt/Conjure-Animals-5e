@@ -2,7 +2,6 @@
   "name": "beast-manager",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -12,14 +11,19 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
+    "lz-string": "^1.5.0",
     "vue": "^3.3.4",
     "vue-router": "^4.2.2"
   },
   "devDependencies": {
     "@rushstack/eslint-patch": "^1.2.0",
+    "@types/node": "^24.1.0",
     "@vitejs/plugin-vue": "^4.2.3",
+    "@vue/compiler-sfc": "^3.5.18",
     "@vue/eslint-config-prettier": "^7.1.0",
     "@vue/test-utils": "^2.3.2",
+    "@vue/tsconfig": "^0.7.0",
+    "@vue/typescript-plugin": "^3.0.4",
     "autoprefixer": "^10.4.14",
     "eslint": "^8.39.0",
     "eslint-plugin-vue": "^9.11.0",
@@ -27,8 +31,10 @@
     "postcss": "^8.4.26",
     "prettier": "^2.8.8",
     "tailwindcss": "^3.3.3",
+    "typescript": "^5.9.2",
     "vite": "^4.3.9",
     "vite-svg-loader": "^4.0.0",
-    "vitest": "^0.32.0"
+    "vitest": "^0.32.0",
+    "vue-tsc": "^3.0.4"
   }
 }

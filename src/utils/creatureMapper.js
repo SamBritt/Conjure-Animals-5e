@@ -292,14 +292,169 @@ function calculateAverageDamage(diceData) {
 // Fix 3: Update extractDamageFromText to handle variable damage types
 function extractDamageFromText(text) {
   if (!text) return [];
-
+  
+  // FIRST: Extract and store ongoing damage effects
+  const ongoingEffects = [];
+  
+  // Single comprehensive pattern for ongoing damage effects
+  const ongoingDamagePattern = /(and it |^|, and )?(takes|suffers) (\d+) \(([^)]+)\) (\w+) damage at the (start|beginning) of/gi;
+  
+  // Extract ongoing damage data
+  let cleanedText = text;
+  let match; // Declare once at function scope
+  while ((match = ongoingDamagePattern.exec(text))) {
+    const average = parseInt(match[3]);
+    const formula = match[4];
+    const damageType = match[5];
+    
+    const diceData = parseDiceNotation(formula);
+    if (diceData) {
+      ongoingEffects.push({
+        trigger: 'start_of_turn', // We know this much for sure
+        damage: {
+          ...diceData,
+          type: damageType.toLowerCase(),
+          average: average,
+          formula: formula
+        },
+        fullText: match[0].trim()
+      });
+    }
+  }
+  
+  // Remove ongoing damage from the text
+  ongoingDamagePattern.lastIndex = 0; // Reset regex
+  cleanedText = cleanedText.replace(ongoingDamagePattern, '');
+  
+  // Continue with normal damage extraction using the cleaned text
   const results = [];
+  
+  // Store ongoing effects in results for later access
+  results.ongoingEffects = ongoingEffects;
 
-  // Handle variable damage types like "Necrotic or Radiant damage (empyrean's choice)"
+  // Handle conditional damage patterns FIRST (before other patterns)
+  // Pattern 1: Base damage before "or" - with {@damage} tags
+  const baseBeforeOrRegex = /\{@h\}(\d+)\s+\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage[—,]?\s*or/gi;
+  while ((match = baseBeforeOrRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
+      results.push({
+        ...diceData,
+        type: match[3].toLowerCase(),
+        conditional: {
+          isConditional: true,
+          condition: "normal"
+        }
+      });
+    }
+  }
+
+  // Pattern 2: Conditional damage after "or" - with {@damage} tags
+  const conditionalRegex = /or\s+(\d+)\s+\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage\s+if\s+([^—.,]+?)(?:\s*[—.,]\s*|$)/gi;
+  while ((match = conditionalRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
+      results.push({
+        ...diceData,
+        type: match[3].toLowerCase(),
+        conditional: {
+          isConditional: true,
+          condition: match[4].trim()
+            .replace(/\{@condition ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+            .replace(/\{@variantrule ([^|\[]+)(?:\s*\[[^\]]*\])?(?:\|[^}]*)?\}/g, '$1')
+        }
+      });
+    }
+  }
+
+  // If we found conditional damage, also look for "plus" damage but don't return early yet
+  const plusDamageRegex = /plus\s+(\d+)\s+\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
+  while ((match = plusDamageRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
+      results.push({
+        ...diceData,
+        type: match[3].toLowerCase()
+        // No conditional metadata - this is always-rolled damage
+      });
+    }
+  }
+
+  // If we found conditional damage, return early (but after processing plus damage)
+  if (results.some(r => r.conditional?.isConditional)) {
+    return results;
+  }
+
+  // COMPREHENSIVE DAMAGE EXTRACTION for non-conditional attacks
+  // This handles all damage instances in the text, including "X damage plus Y damage" patterns
+  
+  // Helper function to check for duplicates
+  const isDuplicate = (newDamage, existingResults) => {
+    return existingResults.some(r => 
+      r.dieCount === newDamage.dieCount && 
+      r.die === newDamage.die && 
+      r.modifier === newDamage.modifier && 
+      r.type === newDamage.type
+    );
+  };
+
+  // Try patterns in order of specificity, stopping when we find matches
+
+  // Pattern 1: Handle {@damage} tagged damage
+  const taggedDamageRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
+  while ((match = taggedDamageRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
+      const newDamage = { ...diceData, type: match[3].toLowerCase() };
+      if (!isDuplicate(newDamage, results)) {
+        results.push(newDamage);
+      }
+    }
+  }
+
+  // If we found tagged damage, return (most specific)
+  if (results.length > 0) {
+    return results;
+  }
+
+  // Pattern 2: Handle {@h} prefixed damage  
+  const hDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
+  while ((match = hDamageRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
+      const newDamage = { ...diceData, type: match[3].toLowerCase() };
+      if (!isDuplicate(newDamage, results)) {
+        results.push(newDamage);
+      }
+    }
+  }
+
+  // If we found {@h} damage, return
+  if (results.length > 0) {
+    return results;
+  }
+
+  // Pattern 3: Handle raw damage patterns (no tags)
+  // This catches "7 (1d8 + 3) piercing damage plus 13 (3d8) cold damage"
+  const rawDamageRegex = /(\d+)\s*\((\d+d\d+(?:\s*[+]\s*\d+)?)\)\s+([A-Za-z]+)\s+damage/gi;
+  while ((match = rawDamageRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
+      const newDamage = { ...diceData, type: match[3].toLowerCase() };
+      if (!isDuplicate(newDamage, results)) {
+        results.push(newDamage);
+      }
+    }
+  }
+
+  // If we found raw damage, return
+  if (results.length > 0) {
+    return results;
+  }
+
+  // Pattern 4: Handle variable damage types like "Necrotic or Radiant damage (empyrean's choice)"
   const variableTypeRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+\s+or\s+[A-Za-z]+)\s+damage\s*\([^)]*choice[^)]*\)/gi;
-  let match;
-
-  while ((match = variableTypeRegex.exec(text))) {
+  while ((match = variableTypeRegex.exec(cleanedText))) {
     const diceData = parseDiceNotation(match[2]);
     if (diceData) {
       results.push({
@@ -310,88 +465,27 @@ function extractDamageFromText(text) {
     }
   }
 
-  // Handle format: {@h}25 ({@damage 5d6 + 8}) damage of a type chosen...
-  if (results.length === 0) {
-    const variableDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+damage of a type/gi;
-
-    while ((match = variableDamageRegex.exec(text))) {
-      const diceData = parseDiceNotation(match[2]);
-      if (diceData) {
-        results.push({
-          ...diceData,
-          type: 'variable'
-        });
-      }
-    }
-  }
-
-  // Handle multiple damage instances: "12 ({@damage 2d6 + 5}) Slashing damage plus 17 ({@damage 5d6}) Fire damage"
-  if (results.length === 0) {
-    const multiDamageRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
-
-    while ((match = multiDamageRegex.exec(text))) {
-      const diceData = parseDiceNotation(match[2]);
-      if (diceData) {
-        results.push({
-          ...diceData,
-          type: match[3].toLowerCase()
-        });
-      }
-    }
-  }
-
-  // Handle format: {@h}13 ({@damage 2d8 + 4}) Piercing damage
-  if (results.length === 0) {
-    const hDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
-    while ((match = hDamageRegex.exec(text))) {
-      const diceData = parseDiceNotation(match[2]);
-      if (diceData) {
-        results.push({
-          ...diceData,
-          type: match[3].toLowerCase()
-        });
-      }
-    }
-  }
-
-  // Handle simple format: {@damage 1d4 + 3} Bludgeoning damage
-  if (results.length === 0) {
-    const simpleDamageRegex = /\{@(?:damage|h) ([^}]+)\}\s+([A-Za-z]+)\s+damage/gi;
-    while ((match = simpleDamageRegex.exec(text))) {
-      const diceData = parseDiceNotation(match[1]);
-      if (diceData) {
-        results.push({
-          ...diceData,
-          type: match[2].toLowerCase()
-        });
-      }
-    }
-  }
-
-  // Handle standalone {@damage} tags: 14 ({@damage 4d6}) Lightning damage
-  if (results.length === 0) {
-    const standaloneDamageRegex = /(\d+)\s*\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage/gi;
-    while ((match = standaloneDamageRegex.exec(text))) {
-      const diceData = parseDiceNotation(match[2]);
-      if (diceData) {
-        results.push({
-          ...diceData,
-          type: match[3].toLowerCase()
-        });
-      }
-    }
-  }
-
-  // Handle raw format: "10 (2d6 + 3) Bludgeoning damage"
-  if (results.length === 0) {
-    const rawDamageRegex = /(\d+)\s*\((\d+)d(\d+)(?:\s*[+]\s*(\d+))?\)\s+([A-Za-z]+)\s+damage/gi;
-    while ((match = rawDamageRegex.exec(text))) {
+  // Pattern 5: Handle damage of chosen type
+  const variableDamageRegex = /\{@h\}(\d+)\s*\(\{@damage ([^}]+)\}\)\s+damage of a type/gi;
+  while ((match = variableDamageRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[2]);
+    if (diceData) {
       results.push({
-        dieCount: parseInt(match[2]),
-        die: parseInt(match[3]),
-        modifier: match[4] ? parseInt(match[4]) : 0,
-        type: match[5].toLowerCase()
+        ...diceData,
+        type: 'variable'
       });
+    }
+  }
+
+  // Pattern 6: Handle simple tagged damage
+  const simpleDamageRegex = /\{@(?:damage|h) ([^}]+)\}\s+([A-Za-z]+)\s+damage/gi;
+  while ((match = simpleDamageRegex.exec(cleanedText))) {
+    const diceData = parseDiceNotation(match[1]);
+    if (diceData) {
+      const newDamage = { ...diceData, type: match[2].toLowerCase() };
+      if (!isDuplicate(newDamage, results)) {
+        results.push(newDamage);
+      }
     }
   }
 
@@ -433,10 +527,6 @@ function extractHealingFromText(text) {
   }
 
   return results;
-}
-
-function parseDamageEntry(entry) {
-  return extractDamageFromText(entry);
 }
 
 // Fix: Update cleanSpellEntry to remove asterisks from spell names
@@ -499,6 +589,9 @@ function cleanComplexText(text) {
     .replace(/\{@dc (\d+)\}/g, 'DC $1')
     .replace(/\{@dice ([^}]+)\}/g, '$1')
     .replace(/\{@hazard ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+    .replace(/\{@action ([^|}]+)(?:\|\|([^}]+))?\}/g, (match, action, displayText) => {
+  return displayText || action;
+})
     .replace(/\{@action [^|}]+(?:\|[^|}]+)?\|([^}]+)\}/g, '$1')
     .replace(/\{@action ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
     .replace(/\{@condition ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
@@ -565,12 +658,6 @@ function cleanComplexText(text) {
   return result;
 }
 
-// Helper function to escape regex special characters
-function escapeRegex(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-
 // Fix 2: Update parseGear function to handle attachedItems
 function parseGear(raw) {
   const gear = [];
@@ -579,20 +666,25 @@ function parseGear(raw) {
   if (raw.gear) {
     const gearItems = raw.gear.map(item => {
       if (typeof item === 'string') {
-        return item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+        const cleaned = item
+          .replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+          .split('|')[0];
+        return cleaned;
       }
       if (typeof item === 'object' && item !== null) {
         if (item.name) {
-          return item.name.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
+          return item.name.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+            .split('|')[0];
+        } else if (item.item) {
+          const result = item.item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1').split('|')[0];
+    return result;
+        } else if (item.entry) {
+          return item.entry.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1')
+            .split('|')[0];
+        } else {
+          console.log('Unknown gear object structure:', JSON.stringify(item, null, 2));
+          return 'Unknown Item';
         }
-        if (item.item) {
-          return item.item.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
-        }
-        if (item.entry) {
-          return item.entry.replace(/\{@item ([^|}]+)(?:\|[^}]*)?\}/g, '$1');
-        }
-        console.log('Unknown gear object structure:', JSON.stringify(item, null, 2));
-        return 'Unknown Item';
       }
       return String(item);
     });
@@ -602,14 +694,10 @@ function parseGear(raw) {
   // Handle attachedItems property (NEW)
   if (raw.attachedItems) {
     const attachedItems = raw.attachedItems.map(item => {
-      // attachedItems format is usually "itemname|source"
       if (typeof item === 'string') {
-        // Split on | and take the first part, then clean it up
+        // Split on | and take the first part (remove source reference)
         const itemName = item.split('|')[0];
-        // Convert to title case and clean up
-        return itemName.split(/[-_]/)
-          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-          .join(' ');
+        return itemName;
       }
       return String(item);
     });
@@ -617,6 +705,18 @@ function parseGear(raw) {
   }
 
   return gear;
+}
+
+function parseAttachedItems(raw) {
+  if (!raw.attachedItems) return [];
+  
+  return raw.attachedItems.map(item => {
+    if (typeof item === 'string') {
+      // Split on | and take the first part (remove source reference)
+      return item.split('|')[0];
+    }
+    return String(item);
+  });
 }
 
 // Fix 2: Add otherSources parsing function  
@@ -751,11 +851,15 @@ function parseAttacks(rawActions) {
 
       // Clean up text more carefully - handle complex 5etools tags
       let cleanText = cleanComplexText(entry);
+const damage = mapDamageData(extractDamageFromText(entry));
 
+// Add this check:
+const hasConditionalDamage = damage.some(d => d.conditional?.isConditional);
       return {
         name: a.name.replace(/\s*\{.*?\}/g, '').trim(),
         attackModifier,
-        damage: mapDamageData(extractDamageFromText(entry)),
+        damage,
+        damageType: hasConditionalDamage ? 'conditional' : 'standard', // ADD THIS
         range,
         recharge,
         components: parseAttackComponents(entry),
@@ -1155,12 +1259,12 @@ function parseSpellcasting(raw) {
 // Fix 3: Update formatSpellsForTrait to fix spacing and singular/plural slots
 function formatSpellsForTrait(spells) {
   const parts = [];
-  
+
   if (spells.will) {
     parts.push(`At will: ${spells.will.join(', ')}`);
   }
-  
-   if (spells.daily) {
+
+  if (spells.daily) {
     Object.keys(spells.daily).forEach(freq => {
       // Handle "e" suffix (like "3e" meaning "3/day each")
       let count;
@@ -1170,48 +1274,48 @@ function formatSpellsForTrait(spells) {
       } else {
         count = freq === '1' ? 'once per day' : `${freq} times per day`;
       }
-      
+
       // Clean any {@dice} tags from spells in the daily list and fix whitespace
-      const cleanSpells = spells.daily[freq].map(spell => 
+      const cleanSpells = spells.daily[freq].map(spell =>
         spell.replace(/\(\{@dice ([^}]+)\}\)/g, '($1)')  // Handle ({@dice ...})
-            .replace(/\{@dice ([^}]+)\}/g, '$1')        // Handle {@dice ...}
-            .replace(/\\"/g, '"')                       // Handle escaped quotes
-            .replace(/\s+/g, ' ')                       // Normalize whitespace
-            .replace(/\s+([.!?])/g, '$1')               // Remove spaces before punctuation
-            .trim()
-        );
-            
+          .replace(/\{@dice ([^}]+)\}/g, '$1')        // Handle {@dice ...}
+          .replace(/\\"/g, '"')                       // Handle escaped quotes
+          .replace(/\s+/g, ' ')                       // Normalize whitespace
+          .replace(/\s+([.!?])/g, '$1')               // Remove spaces before punctuation
+          .trim()
+      );
+
       parts.push(`${count}: ${cleanSpells.join(', ')}`);
     });
   }
-  
+
   if (spells.leveled) {
     Object.keys(spells.leveled).sort((a, b) => parseInt(a) - parseInt(b)).forEach(level => {
       const levelData = spells.leveled[level];
       if (level === '0') {
         // Handle cantrips
-        const cleanSpells = levelData.spells.map(spell => 
+        const cleanSpells = levelData.spells.map(spell =>
           spell.replace(/\\"/g, '"')
-               .replace(/\s+/g, ' ')
-               .replace(/\s+([.!?])/g, '$1')
-               .trim()
+            .replace(/\s+/g, ' ')
+            .replace(/\s+([.!?])/g, '$1')
+            .trim()
         );
         parts.push(`Cantrips (at will): ${cleanSpells.join(', ')}`);
       } else {
         // FIXED: Handle regular spell levels with proper singular/plural and formatting
         const ordinal = level === '1' ? '1st' : level === '2' ? '2nd' : level === '3' ? '3rd' : `${level}th`;
         const slotText = levelData.slots === 1 ? 'slot' : 'slots';
-        const cleanSpells = levelData.spells.map(spell => 
+        const cleanSpells = levelData.spells.map(spell =>
           spell.replace(/\\"/g, '"')
-               .replace(/\s+/g, ' ')
-               .replace(/\s+([.!?])/g, '$1')
-               .trim()
+            .replace(/\s+/g, ' ')
+            .replace(/\s+([.!?])/g, '$1')
+            .trim()
         );
         parts.push(`${ordinal} level (${levelData.slots} ${slotText}): ${cleanSpells.join(', ')}`);
       }
     });
   }
-  
+
   // FIXED: Add proper spacing between spell level groups
   return parts.join(' ');
 }
@@ -1391,14 +1495,23 @@ function parseReactions(raw) {
 }
 
 function mapDamageData(damageArray) {
-  return damageArray.map(d => ({
-    dieCount: d.dieCount,
-    die: d.die,
-    modifier: d.modifier,
-    type: d.type,
-    average: calculateAverageDamage(d),
-    formula: `${d.dieCount}d${d.die}${d.modifier ? ` + ${d.modifier}` : ''}`
-  }));
+  return damageArray.map(d => {
+    const result = {
+      dieCount: d.dieCount,
+      die: d.die,
+      modifier: d.modifier,
+      type: d.type,
+      average: calculateAverageDamage(d),
+      formula: `${d.dieCount}d${d.die}${d.modifier ? ` + ${d.modifier}` : ''}`
+    };
+    
+    // Pass through conditional metadata if it exists
+    if (d.conditional) {
+      result.conditional = d.conditional;
+    }
+    
+    return result;
+  });
 }
 
 // Fix: Update mapCreature to clean {@creature} tags from languages array
@@ -1581,7 +1694,7 @@ function mapCreature(raw, id = null) {
     // Additional Data
     environment: raw.environment || [],
     treasure: raw.treasure || [],
-    attachedItems: raw.attachedItems || [],
+    attachedItems: parseAttachedItems(raw),
     legendaryGroup: raw.legendaryGroup || null,
     tokenUrl: raw.tokenUrl || null,
     hasToken: raw.hasToken || false,

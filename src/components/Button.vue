@@ -32,19 +32,14 @@ const buttonProps = computed(() => {
 })
 
 const buttonStyles = computed(() => {
-  const styles = [
-    `text-black`,
-    `transition-all`,
-    `ease`,
-    `active:scale-95`
-  ]
+  const styles = [`text-black`, `transition-all`, `ease`, `active:scale-95`]
 
   if (props.rounded) styles.push('rounded-full', 'w-12', 'h-12')
   else if (!props.asIcon) styles.push(`rounded-md`, `py-1`, `px-2`)
   else styles.push(`p-0`)
 
   if (props.rounded && props.small) styles.push('p-0')
-  else if(props.asIcon) styles.push('p-0')
+  else if (props.asIcon) styles.push('p-0')
   else styles.push('p-2')
 
   if (props.small) styles.push(`w-5`, `h-5`, `border-1`)

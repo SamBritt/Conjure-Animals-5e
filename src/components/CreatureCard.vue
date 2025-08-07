@@ -1,11 +1,16 @@
-<script setup>
+<script setup lang="ts">
 import { defineEmits, ref, computed } from 'vue'
+import type { AbilityKey, Creature, Attack } from '@/types/Creatures'
 
-const props = defineProps({
-  creature: Object,
-  index: Number,
-  type: String
-})
+interface SummonedCreature extends Creature {
+  index: number
+}
+
+const props = defineProps<{
+  creature: Creature
+  index: number
+  type: string
+}>()
 
 const emit = defineEmits(['select'])
 
@@ -53,7 +58,7 @@ const creatureClass = computed(() => {
       {{ index }}
     </div>
     <div class="flex flex-col">
-      <p class="m-0 text-xl">{{ creature.hp }}</p>
+      <p class="m-0 text-xl">{{ creature.hp.average }}</p>
       <p
         v-if="props.type == 'enemy'"
         class="absolute flex justify-center w-6 top-0 right-0 bg-zinc-200 rounded-full m-0 text-md">

@@ -14,8 +14,8 @@ const emits = defineEmits(['increase', 'decrease', 'submit', 'cancel'])
                 <slot />
             </h4>
             <Counter
-                @increase="(count) =>emits('increase', count)"
-                @decrease="(count) => emits('decrease', count)" />
+                @increase="(count: any) =>emits('increase', count)"
+                @decrease="(count: any) => emits('decrease', count)" />
         </div>
 
         <div class="">
