@@ -11,7 +11,7 @@ import Button from '@/components/Button.vue'
       <RouterLink to="/battle">Battle</RouterLink>
     </nav>
   </header>
-  <main class="h-screen bg-slate-400">
+  <main class="h-screen bg-gray-700">
     
 
     <RouterView />

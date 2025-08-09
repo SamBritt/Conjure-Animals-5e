@@ -19,25 +19,25 @@ const menuClass = () => {
     `bg-zinc-700`,
     `text-zinc-100`,
     `shadow-lg`
-  ]
+  ];
 
   switch (props.position) {
     case 'left':
-      styles.push('left-0', 'rounded-r-lg')
-      break
+      styles.push('left-0', 'rounded-r-lg');
+      break;
     case 'right':
-      styles.push('right-0', 'rounded-l-lg')
-      break
+      styles.push('right-0', 'rounded-l-lg');
+      break;
     case 'bottom':
-      styles.push('bottom-0', 'rounded-t-lg')
-      break
+      styles.push('bottom-0', 'rounded-t-lg');
+      break;
     case 'top':
-      styles.push('top-0', 'rounded-b-lg')
-      break
+      styles.push('top-0', 'rounded-b-lg');
+      break;
   }
 
-  return styles
-}
+  return styles;
+};
 </script>
 
 <template>
@@ -46,4 +46,6 @@ const menuClass = () => {
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+/* Minimal CSS to not interfere with animations */
+</style>

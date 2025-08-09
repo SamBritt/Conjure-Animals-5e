@@ -35,20 +35,23 @@
     <!-- Results Summary -->
     <div v-if="importResults" class="mb-6">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-green-900/30 border border-green-600 rounded-lg p-4 text-center">
-          <div class="text-2xl font-bold text-green-400">{{ importResults.successful }}</div>
-          <div class="text-sm text-green-300">Successfully Mapped</div>
-        </div>
+        <ImportResultCard
+          type="success"
+          :count="importResults.successful"
+          label="Successfully Mapped"
+        />
         
-        <div class="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 text-center">
-          <div class="text-2xl font-bold text-yellow-400">{{ importResults.skipped }}</div>
-          <div class="text-sm text-yellow-300">Skipped (Duplicates)</div>
-        </div>
+        <ImportResultCard
+          type="warning"
+          :count="importResults.skipped"
+          label="Skipped (Duplicates)"
+        />
         
-        <div class="bg-red-900/30 border border-red-600 rounded-lg p-4 text-center">
-          <div class="text-2xl font-bold text-red-400">{{ importResults.failed }}</div>
-          <div class="text-sm text-red-300">Failed to Map</div>
-        </div>
+        <ImportResultCard
+          type="error"
+          :count="importResults.failed"
+          label="Failed to Map"
+        />
       </div>
 
       <!-- Error Details -->
@@ -57,13 +60,61 @@
           <summary class="p-4 cursor-pointer font-medium text-red-400 hover:bg-red-900/30">
             View Mapping Errors ({{ importResults.errors.length }})
           </summary>
-          <div class="p-4 pt-0 max-h-40 overflow-y-auto">
+          <div class="p-4 pt-0 max-h-40 overflow-y-auto custom-scrollbar">
             <div v-for="error in importResults.errors" :key="error.name" class="mb-2 text-sm">
               <span class="font-medium">{{ error.name }}:</span>
               <span class="text-gray-400 ml-2">{{ error.error }}</span>
             </div>
           </div>
         </details>
+      </div>
+
+      <!-- Skipped Creatures Details -->
+      <div v-if="importResults.skippedCreatures.length > 0" class="mt-4">
+        <details class="bg-yellow-900/20 border border-yellow-600 rounded-lg">
+          <summary class="p-4 cursor-pointer font-medium text-yellow-400 hover:bg-yellow-900/30">
+            View Skipped Creatures ({{ importResults.skippedCreatures.length }})
+          </summary>
+          <div class="p-4 pt-0 max-h-40 overflow-y-auto custom-scrollbar">
+            <div v-for="creatureName in importResults.skippedCreatures" :key="creatureName" class="mb-1 text-sm">
+              <span class="font-medium">{{ creatureName }}</span>
+              <span class="text-gray-400 ml-2">(duplicate name)</span>
+            </div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <!-- Import Mode Selection -->
+    <div v-if="!isImporting && !importResults && dataStore.hasData.value" class="mb-6">
+      <div class="bg-zinc-700 rounded-lg p-4">
+        <h3 class="font-medium mb-3">Import Mode</h3>
+        <div class="flex gap-4">
+          <label class="flex items-center cursor-pointer">
+            <input 
+              v-model="importMode" 
+              value="merge" 
+              type="radio" 
+              class="mr-2 text-blue-500"
+            />
+            <div>
+              <div class="font-medium">Merge</div>
+              <div class="text-xs text-gray-400">Add new creatures, keep existing ones</div>
+            </div>
+          </label>
+          <label class="flex items-center cursor-pointer">
+            <input 
+              v-model="importMode" 
+              value="replace" 
+              type="radio" 
+              class="mr-2 text-blue-500"
+            />
+            <div>
+              <div class="font-medium">Replace</div>
+              <div class="text-xs text-gray-400">Replace all creatures with imported ones</div>
+            </div>
+          </label>
+        </div>
       </div>
     </div>
 
@@ -165,6 +216,7 @@
 import { ref } from 'vue'
 import Button from './Button.vue'
 import DataManager from './DataManager.vue'
+import ImportResultCard from './ImportResultCard.vue'
 import { useDataStore } from '@/composables/useDataStore'
 import mapCreature from '@/utils/creatureMapper' // Your existing mapper
 import type { Creature } from '@/types/Creatures'
@@ -173,14 +225,15 @@ const emits = defineEmits<{
   close: []
 }>()
 
-// State
+// Use the new VueUse data store
 const dataStore = useDataStore()
 const fileInput = ref<HTMLInputElement>()
 const isDragOver = ref(false)
 const isImporting = ref(false)
 const showDataManager = ref(false)
+const importMode = ref<'merge' | 'replace'>('merge')
 
-// Import tracking
+// Import tracking interfaces
 interface ImportStatus {
   phase: string
   processed: number
@@ -194,6 +247,7 @@ interface ImportResults {
   skipped: number
   failed: number
   errors: Array<{ name: string; error: string }>
+  skippedCreatures: string[]
 }
 
 const importStatus = ref<ImportStatus | null>(null)
@@ -224,12 +278,14 @@ const processFiles = async (files: File[]) => {
     successful: 0,
     skipped: 0, 
     failed: 0,
-    errors: []
+    errors: [],
+    skippedCreatures: []
   }
   
+  // Backup current data before starting
+  const backupCreatures = [...dataStore.creatures.value]
   const allCreatures: Creature[] = []
-  const existingCreatures = await dataStore.loadCreatures()
-  const existingIds = new Set(existingCreatures.map(c => c.id))
+  // Remove the existingIds filtering - let the store handle duplicates based on import mode
   
   // Count total creatures across all files
   let totalCreatures = 0
@@ -293,16 +349,22 @@ const processFiles = async (files: File[]) => {
       importStatus.value.progress = 30 + ((processedCount / totalCreatures) * 60) // 30-90% for processing
       
       try {
-        const mappedCreature = mapCreature(rawCreature, rawCreature.id || processedCount)
-        
-        // Check for duplicates
-        if (existingIds.has(mappedCreature.id)) {
+        // CHANGE 2: Simple check for already-mapped data
+        if (rawCreature.abilities?.str?.mod !== undefined) {
+          results.errors.push({
+            name: rawCreature.name || `Creature ${i + 1}`,
+            error: 'This looks like already-mapped data - skipping'
+          })
           results.skipped++
           continue
         }
         
+        const mappedCreature = mapCreature(rawCreature, rawCreature.id || processedCount)
+        
+        // For merge mode, track duplicates but still collect them for the store to handle
+        // For replace mode, we don't care about duplicates since we're replacing everything
+        
         allCreatures.push(mappedCreature)
-        existingIds.add(mappedCreature.id)
         results.successful++
         
       } catch (error) {
@@ -312,6 +374,15 @@ const processFiles = async (files: File[]) => {
           name: rawCreature.name || `Creature ${i + 1}`,
           error: error.message || 'Unknown mapping error'
         })
+        
+        // CHANGE 3: Stop if too many failures (>50% failed)
+        if (results.failed > processedCount / 2 && processedCount > 10) {
+          results.errors.push({
+            name: 'Import Process',
+            error: 'Too many failures - stopping import to prevent data corruption'
+          })
+          break
+        }
       }
       
       // Small delay to keep UI responsive
@@ -321,18 +392,50 @@ const processFiles = async (files: File[]) => {
     }
   }
   
-  // Save to storage
+  // CHANGE 4: Try to save, restore backup if it fails
   importStatus.value.phase = 'Saving to storage...'
   importStatus.value.progress = 90
   
   if (allCreatures.length > 0) {
-    const combinedCreatures = [...existingCreatures, ...allCreatures]
-    const success = await dataStore.saveCreatures(combinedCreatures)
-    
-    if (!success) {
+    try {
+      let importResult: { success: boolean; errors: string[] }
+      
+      if (importMode.value === 'replace') {
+        // Replace all creatures with imported ones
+        importResult = await dataStore.replaceCreatures(allCreatures) 
+          ? { success: true, errors: [] } 
+          : { success: false, errors: ['Failed to replace creatures'] }
+      } else {
+        // Merge mode - add creatures, avoiding duplicate names
+        const beforeCount = dataStore.creatures.value.length
+        importResult = await dataStore.addCreatures(allCreatures)
+        
+        if (importResult.success) {
+          const afterCount = dataStore.creatures.value.length
+          const actuallyAdded = afterCount - beforeCount
+          const actuallySkipped = allCreatures.length - actuallyAdded
+          
+          // Update results to show actual numbers
+          results.successful = actuallyAdded
+          results.skipped = actuallySkipped
+          results.skippedCreatures = importResult.skippedCreatures || []
+        }
+      }
+      
+      if (!importResult.success) {
+        // Restore backup
+        await dataStore.replaceCreatures(backupCreatures)
+        results.errors.push({
+          name: 'Storage',
+          error: 'Failed to save - restored previous data: ' + importResult.errors.join(', ')
+        })
+      }
+    } catch (error) {
+      // Emergency restore
+      await dataStore.replaceCreatures(backupCreatures)
       results.errors.push({
         name: 'Storage',
-        error: 'Failed to save creatures to localStorage'
+        error: 'Save crashed - restored previous data'
       })
     }
   }
@@ -358,3 +461,24 @@ const resetImport = () => {
   }
 }
 </script>
+
+<style scoped>
+/* Custom scrollbar for error and skipped creatures lists */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #374151;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #6B7280;
+  border-radius: 3px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9CA3AF;
+}
+</style>

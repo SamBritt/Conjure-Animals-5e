@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useMouse, useEventListener } from '@vueuse/core'
 import CreatureSelect from '@/components/CreatureSelect.vue'
 import RollTable from '@/components/RollTable.vue'
 import Animate from '@/components/Animate.vue'
@@ -21,6 +22,9 @@ import type { AbilityKey, Creature, Attack, ActionDamage } from '@/types/Creatur
 // Add this interface for summoned creatures
 export interface SummonedCreature extends Creature {
   index: number
+  tempHP?: number
+  maxHP: number  // Store original HP for healing calculations
+  uuid: string   // Unique identifier that doesn't change when creatures die
 }
 
 // Define additional interfaces for your component
@@ -117,6 +121,16 @@ const damageDetails = ref<DamageDetail[]>([])
 const healBy = ref<number>(0)
 const enemySummonCount = ref<number>(0)
 
+// Drag selection state
+const isDragging = ref<boolean>(false)
+const dragStart = ref<{ x: number; y: number; shiftKey?: boolean }>({ x: 0, y: 0 })
+const dragEnd = ref<{ x: number; y: number }>({ x: 0, y: 0 })
+const selectionBox = ref<HTMLElement | null>(null)
+
+
+// Mouse tracking
+const { x: mouseX, y: mouseY } = useMouse()
+
 const handleToggle = (rollType: 'advantage' | 'disadvantage'): void => {
   if (rollType === 'advantage') {
     advantage.value = !advantage.value
@@ -129,9 +143,19 @@ const handleToggle = (rollType: 'advantage' | 'disadvantage'): void => {
 
 const loadSummons = (count: number, creature: Creature): void => {
   summonCount.value = count
+  // Clear any existing selections when loading new creatures
+  attackingCreatures.value = []
+  
   creatures.value = Array.from({ length: count }, (_, index): SummonedCreature => ({ 
     ...creature,
-    index: index + 1
+    index: index + 1,
+    maxHP: creature.hp.average,  // Store the original HP as maxHP
+    uuid: `${creature.id}-${index + 1}-${Date.now()}`,  // Unique identifier
+    hp: { 
+      average: creature.hp.average, 
+      formula: creature.hp.formula,
+      special: creature.hp.special 
+    }  // Deep copy the HP object
   }))
   openCreatureSelect()
 }
@@ -168,7 +192,7 @@ const closeHealthMenu = (): void => {
 }
 
 const handleCreatureSelect = (creature: SummonedCreature): void => {
-  const existingIndex = attackingCreatures.value.findIndex(c => c.index === creature.index)
+  const existingIndex = attackingCreatures.value.findIndex(c => c.uuid === creature.uuid)
   if (existingIndex !== -1) {
     attackingCreatures.value.splice(existingIndex, 1)
   } else {
@@ -178,6 +202,86 @@ const handleCreatureSelect = (creature: SummonedCreature): void => {
 
 const handleEnemySelect = (creature: Enemy): void => {
   selectedEnemy.value = creature
+}
+
+// Drag selection functions
+const startDragSelection = (event: MouseEvent): void => {
+  // Don't start drag selection if clicking on a creature card or UI element
+  if ((event.target as HTMLElement).closest('.creature-card') || 
+      (event.target as HTMLElement).closest('aside') ||
+      (event.target as HTMLElement).closest('.side-menu') ||
+      (event.target as HTMLElement).closest('button') ||
+      (event.target as HTMLElement).tagName === 'INPUT') {
+    return
+  }
+  
+  // Only start with left mouse button
+  if (event.button !== 0) return
+  
+  isDragging.value = true
+  dragStart.value = { x: mouseX.value, y: mouseY.value }
+  dragEnd.value = { x: mouseX.value, y: mouseY.value }
+  
+  // Store whether shift was held for additive selection
+  dragStart.value.shiftKey = event.shiftKey
+}
+
+const updateDragSelection = (): void => {
+  if (!isDragging.value) return
+  dragEnd.value = { x: mouseX.value, y: mouseY.value }
+}
+
+const endDragSelection = (): void => {
+  if (!isDragging.value) return
+  
+  // Calculate drag distance to avoid accidental tiny drags
+  const dragDistance = Math.sqrt(
+    Math.pow(dragEnd.value.x - dragStart.value.x, 2) + 
+    Math.pow(dragEnd.value.y - dragStart.value.y, 2)
+  )
+  
+  // Minimum drag distance of 10 pixels to start selection
+  if (dragDistance < 10) {
+    isDragging.value = false
+    return
+  }
+  
+  // Calculate selection area
+  const minX = Math.min(dragStart.value.x, dragEnd.value.x)
+  const maxX = Math.max(dragStart.value.x, dragEnd.value.x)
+  const minY = Math.min(dragStart.value.y, dragEnd.value.y)
+  const maxY = Math.max(dragStart.value.y, dragEnd.value.y)
+  
+  // Find creatures within selection area
+  const creaturesInSelection: SummonedCreature[] = []
+  
+  creatures.value.forEach(creature => {
+    const creatureElement = document.querySelector(`[data-creature-uuid="${creature.uuid}"]`) as HTMLElement
+    if (creatureElement) {
+      const rect = creatureElement.getBoundingClientRect()
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      
+      if (centerX >= minX && centerX <= maxX && centerY >= minY && centerY <= maxY) {
+        creaturesInSelection.push(creature)
+      }
+    }
+  })
+  
+  // Update selection
+  if (dragStart.value.shiftKey) {
+    // Additive selection - add to existing selection
+    creaturesInSelection.forEach(creature => {
+      if (!attackingCreatures.value.some(c => c.uuid === creature.uuid)) {
+        attackingCreatures.value.push(creature)
+      }
+    })
+  } else {
+    // Replace current selection
+    attackingCreatures.value = [...creaturesInSelection]
+  }
+  
+  isDragging.value = false
 }
 
 const addEnemies = (count: number): void => {
@@ -209,7 +313,7 @@ const addHealth = (count: number): void => {
 }
 
 const removeHealth = (count: number): void => {
-  healBy.value = count
+  healBy.value = -count  // Make it negative for subtraction
 }
 
 const submitHealthChange = (): void => {
@@ -220,6 +324,9 @@ const submitHealthChange = (): void => {
     case 'Harm':
       harm()
       break
+    case 'Temp HP':
+      addTempHP()
+      break
   }
 }
 
@@ -227,13 +334,15 @@ const heal = (): void => {
   creatures.value
     .filter((creature) =>
       attackingCreatures.value.some(
-        (attackingCreature) => attackingCreature.index === creature.index
+        (attackingCreature) => attackingCreature.uuid === creature.uuid
       )
     )
     .forEach((creature) => {
-      const afterHeal = creature.hp.average + healBy.value
-      const maxHp = creature.hp.average // Assuming this is max HP, you might want to add maxHp to your interface
-      creature.hp.average = afterHeal > maxHp ? maxHp : afterHeal
+      // Heal can only be positive, and only affects HP (not temp HP)
+      if (healBy.value > 0) {
+        const afterHeal = creature.hp.average + healBy.value
+        creature.hp.average = Math.min(afterHeal, creature.maxHP)
+      }
     })
 }
 
@@ -241,15 +350,63 @@ const harm = (): void => {
   creatures.value
     .filter((creature) =>
       attackingCreatures.value.some(
-        (attackingCreature) => attackingCreature.index === creature.index
+        (attackingCreature) => attackingCreature.uuid === creature.uuid
       )
     )
     .forEach((creature) => {
-      creature.hp.average = Math.max(0, creature.hp.average - healBy.value)
+      const damageAmount = Math.abs(healBy.value)
+      let damageRemaining = damageAmount
+      
+      // If creature has temp HP, damage hits temp HP first
+      if (creature.tempHP && creature.tempHP > 0) {
+        if (damageRemaining <= creature.tempHP) {
+          // Damage doesn't exceed temp HP
+          creature.tempHP -= damageRemaining
+          damageRemaining = 0
+        } else {
+          // Damage exceeds temp HP, carry over to real HP
+          damageRemaining -= creature.tempHP
+          creature.tempHP = 0
+        }
+      }
+      
+      // Apply remaining damage to actual HP
+      if (damageRemaining > 0) {
+        creature.hp.average = Math.max(0, creature.hp.average - damageRemaining)
+      }
     })
 
-  // Remove dead creatures
+  // Remove dead creatures (those with 0 HP and 0 temp HP)
+  const deadCreatureUuids = creatures.value
+    .filter(creature => creature.hp.average <= 0)
+    .map(creature => creature.uuid)
+    
   creatures.value = creatures.value.filter((creature) => creature.hp.average > 0)
+  
+  // Remove dead creatures from selection
+  attackingCreatures.value = attackingCreatures.value.filter(
+    creature => !deadCreatureUuids.includes(creature.uuid)
+  )
+}
+
+const addTempHP = (): void => {
+  creatures.value
+    .filter((creature) =>
+      attackingCreatures.value.some(
+        (attackingCreature) => attackingCreature.uuid === creature.uuid
+      )
+    )
+    .forEach((creature) => {
+      if (healBy.value > 0) {
+        // Adding temp HP - doesn't stack, take the higher value
+        const currentTempHP = creature.tempHP || 0
+        creature.tempHP = Math.max(currentTempHP, healBy.value)
+      } else if (healBy.value < 0) {
+        // Subtracting temp HP
+        const currentTempHP = creature.tempHP || 0
+        creature.tempHP = Math.max(0, currentTempHP + healBy.value) // healBy.value is negative
+      }
+    })
 }
 
 const cancelHealthChange = (): void => {
@@ -603,6 +760,34 @@ const canRollDamage = computed<boolean>(() => {
   return true
 })
 
+// Selection box style computed property
+const selectionBoxStyle = computed(() => {
+  if (!isDragging.value) return { display: 'none' }
+  
+  const minX = Math.min(dragStart.value.x, dragEnd.value.x)
+  const maxX = Math.max(dragStart.value.x, dragEnd.value.x)
+  const minY = Math.min(dragStart.value.y, dragEnd.value.y)
+  const maxY = Math.max(dragStart.value.y, dragEnd.value.y)
+  
+  return {
+    position: 'fixed',
+    left: `${minX}px`,
+    top: `${minY}px`,
+    width: `${maxX - minX}px`,
+    height: `${maxY - minY}px`,
+    border: '2px dashed #3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    pointerEvents: 'none',
+    zIndex: 1000
+  }
+})
+
+// Set up event listeners
+useEventListener('mousedown', startDragSelection)
+useEventListener('mousemove', updateDragSelection)  
+useEventListener('mouseup', endDragSelection)
+
+
 const buttonProps = (style?: ButtonStyle) => {
   const props: Record<string, boolean> = {
     outline: true,
@@ -617,7 +802,7 @@ const buttonProps = (style?: ButtonStyle) => {
 
 <template>
   <div class="flex h-full">
-    <aside class="bg-zinc-700 h-screen p-4 flex flex-col relative">
+    <aside class="bg-gray-800 h-screen p-4 flex flex-col relative">
       <div class="flex flex-col gap-4">
         <Button
           @click="openCreatureSelect"
@@ -686,7 +871,7 @@ const buttonProps = (style?: ButtonStyle) => {
     <div class="h-full flex flex-col relative w-full">
       <div class="flex">
         <Animate>
-          <SideMenu v-if="showCreatureSelect">
+          <SideMenu v-show="showCreatureSelect">
             <CreatureSelect @summon="(count: number, creature: Creature) => loadSummons(count, creature)" />
           </SideMenu>
         </Animate>
@@ -833,7 +1018,12 @@ const buttonProps = (style?: ButtonStyle) => {
         </Transition>
       </div>
 
-      <div class="flex flex-col bg-slate-500 w-fit p-2">
+      
+
+      <div
+        v-if="enemies.length"
+        class="flex flex-col justify-center items-center gap-4 h-full">
+        <div class="flex flex-col bg-slate-500 w-fit p-2">
         <h3>Enemy AC: {{ selectedEnemy?.ac ?? '??' }}</h3>
         
         <div v-if="selectedEnemy?.missedRolls?.length">
@@ -855,10 +1045,6 @@ const buttonProps = (style?: ButtonStyle) => {
           </button>
         </div>
       </div>
-
-      <div
-        v-if="enemies.length"
-        class="flex flex-col justify-center items-center gap-4 h-full">
         <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
           <CreatureCard
             v-for="(enemy, idx) in enemies"
@@ -877,7 +1063,10 @@ const buttonProps = (style?: ButtonStyle) => {
           <CreatureCard
             v-for="(creature, idx) in creatures"
             type="creature"
-            :key="`summon-${idx}`"
+            :key="creature.uuid"
+            :data-creature-uuid="creature.uuid"
+            class="creature-card"
+            :selected="attackingCreatures.some(c => c.uuid === creature.uuid)"
             @select="(selectedCreature: SummonedCreature) => handleCreatureSelect(selectedCreature)"
             :creature="creature"
             :index="idx + 1" />
@@ -890,5 +1079,53 @@ const buttonProps = (style?: ButtonStyle) => {
       v-if="showDamageBreakdown"
       :damageDetails="damageDetails"
       @close="showDamageBreakdown = false" />
+    
+    <!-- Drag Selection Box -->
+    <div 
+      v-if="isDragging"
+      :style="selectionBoxStyle"
+      class="selection-box">
+    </div>
   </div>
 </template>
+
+<style scoped>
+/* Disable text selection and image dragging to prevent interference with drag selection */
+.h-full {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Prevent image and element dragging */
+.h-full img,
+.h-full svg,
+.h-full * {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  -moz-user-drag: none;
+  -o-user-drag: none;
+  user-drag: none;
+  pointer-events: auto;
+}
+
+/* Ensure buttons and interactive elements still work */
+button,
+input,
+select,
+textarea {
+  user-select: auto;
+  -webkit-user-select: auto;
+  -moz-user-select: auto;
+  -ms-user-select: auto;
+  pointer-events: auto;
+}
+
+/* Selection box styling */
+.selection-box {
+  border-radius: 4px;
+  transition: none;
+}
+
+</style>

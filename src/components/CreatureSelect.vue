@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeMount } from 'vue'
 import Button from './Button.vue'
 import Counter from '@/components/Counter.vue'
 import CreatureDetailModal from '@/components/CreatureDetailModal.vue'
@@ -12,13 +12,14 @@ const emits = defineEmits<{
   summon: [count: number, creature: Creature]
 }>()
 
-// Use data store instead of manual loading
+// Use the new VueUse data store
 const dataStore = useDataStore()
 
-// Computed properties from data store
+// All reactive data is now directly from the store
 const allCreatures = computed(() => dataStore.creatures.value)
 const loading = computed(() => dataStore.isLoading.value)
 const favorites = computed(() => dataStore.favorites.value)
+const isInitialized = computed(() => dataStore.isInitialized.value)
 
 // Search and filter state
 const searchQuery = ref('')
@@ -40,7 +41,7 @@ const showDetailModal = ref(false)
 const detailCreature = ref<Creature | null>(null)
 const summonCount = ref<number>(8)
 const selectedCreature = ref<Creature | null>(null)
-const showImportMode = ref(false) // Replace showImportModal with showImportMode
+const showImportMode = ref(false)
 
 // Available filter options
 const availableTypes = ['beast', 'fey', 'monstrosity', 'elemental', 'celestial', 'fiend', 'undead', 'humanoid', 'dragon', 'giant', 'aberration', 'construct', 'ooze', 'plant']
@@ -146,6 +147,13 @@ const sortCreatures = (creatures: Creature[]) => {
 
 // Main filtered creatures computation
 const filteredCreatures = computed<Creature[]>(() => {
+  const startTime = performance.now()
+  
+  // Don't compute when still loading
+  if (loading.value || !isInitialized.value) {
+    return []
+  }
+  
   let filtered = allCreatures.value
 
   // Search filter
@@ -185,31 +193,27 @@ const filteredCreatures = computed<Creature[]>(() => {
 
   // Favorites filter
   if (showFavoritesOnly.value) {
-    filtered = filtered.filter(creature => favorites.value.includes(creature.id))
+    filtered = filtered.filter(creature => dataStore.isFavorite(creature.id))
   }
 
   // Apply sorting
-  return sortCreatures(filtered)
+  const result = sortCreatures(filtered)
+  
+  const endTime = performance.now()
+  console.log(`filteredCreatures computed in ${endTime - startTime}ms, returned ${result.length} creatures`)
+  
+  return result
 })
 
-// Toggle favorite using data store
+// Toggle favorite using data store (much simpler now!)
 const toggleFavorite = (creature: Creature, event: Event) => {
   event.stopPropagation()
-  const currentFavorites = [...dataStore.favorites.value]
-  const index = currentFavorites.indexOf(creature.id)
-  
-  if (index > -1) {
-    currentFavorites.splice(index, 1)
-  } else {
-    currentFavorites.push(creature.id)
-  }
-  
-  dataStore.saveFavorites(currentFavorites)
+  dataStore.toggleFavorite(creature.id)
 }
 
 // Check if creature is favorited
 const isFavorite = (creature: Creature) => {
-  return dataStore.favorites.value.includes(creature.id)
+  return dataStore.isFavorite(creature.id)
 }
 
 // Toggle type filter
@@ -259,6 +263,11 @@ const summon = (): void => {
   }
 }
 
+const handleImporterClose = () => {
+  showImportMode.value = false
+}
+
+
 const disableSummon = computed<boolean>(() => {
   return !selectedCreature.value
 })
@@ -273,28 +282,35 @@ const activeFiltersCount = computed(() => {
   if (showFavoritesOnly.value) count++
   return count
 })
+console.log("created")
+onBeforeMount(() => {
+  console.log("opened")
+})
 
-// Initialize data store and handle first-time users
-onMounted(async () => {
-  await dataStore.initialize()
-  
-  
-  // If no creatures, show import modal
-  if (!dataStore.hasData.value) {
-    showImportMode.value = true
-  }
+// Much simpler initialization with proper loading state
+onMounted(() => {
+  console.log('CreatureSelect mounted, isInitialized:', dataStore.isInitialized.value)
+  console.log('DOM rendering complete')
+  // Initialize the data store (handles decompression) - don't await so UI renders immediately
+  dataStore.initialize().then(() => {
+    console.log('Initialize complete')
+    // If no creatures exist after loading, show import mode
+    if (!dataStore.hasData.value) {
+      showImportMode.value = true
+    }
+  })
 })
 </script>
 
 <template>
   <div class="p-4 max-w-4xl">
-    <!-- Show DataImporter when in import mode OR when no creatures exist -->
-    <div v-if="showImportMode || (!dataStore.hasData.value && !loading)">
-      <DataImporter @close="showImportMode = false" />
+    <!-- Show DataImporter only when explicitly in import mode -->
+    <div v-if="showImportMode">
+      <DataImporter @close="handleImporterClose" />
     </div>
 
-    <!-- Show normal creature browser when NOT in import mode AND data exists -->
-    <div v-else-if="!showImportMode && dataStore.hasData.value">
+    <!-- Show normal creature browser when NOT in import mode -->
+    <div v-else>
       <!-- Search Bar -->
       <div class="mb-4">
         <div class="relative">
@@ -344,7 +360,8 @@ onMounted(async () => {
 
         <div class="flex items-center gap-4">
           <span class="text-sm text-gray-300">
-            {{ filteredCreatures.length }} of {{ allCreatures.length }} creatures
+            <span v-if="loading">Loading creatures...</span>
+            <span v-else>{{ filteredCreatures.length }} of {{ allCreatures.length }} creatures</span>
           </span>
           <Counter
             @increase="(count: number) => (summonCount = count)"
@@ -515,7 +532,7 @@ onMounted(async () => {
             <div class="text-right text-xs ml-4">
               <div class="text-lg font-medium text-white mb-1">CR {{ creature.cr }}</div>
               <div class="text-gray-400">HP: {{ creature.hp.average }}</div>
-              <div class="text-right text-xs ml-4">AC: {{ typeof creature.ac === 'object' ? creature.ac.value : creature.ac }}</div>
+              <div class="text-gray-400">AC: {{ typeof creature.ac === 'object' ? creature.ac.value : creature.ac }}</div>
             </div>
           </div>
         </div>
@@ -539,12 +556,6 @@ onMounted(async () => {
           Summon {{ summonCount }} {{ selectedCreature?.name || 'Creature' }}{{ summonCount > 1 ? 's' : '' }}
         </Button>
       </div>
-    </div>
-
-    <!-- Loading State for initial load -->
-    <div v-else-if="loading" class="text-center py-12">
-      <div class="animate-spin w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full mx-auto mb-4"></div>
-      <p class="text-gray-400">Loading your creatures...</p>
     </div>
 
     <!-- Detail Modal (always as modal) -->

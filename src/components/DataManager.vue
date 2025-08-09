@@ -126,7 +126,7 @@ const toastMessage = ref('')
 const toastType = ref<'success' | 'error'>('success')
 
 // Computed
-const storageInfo = computed(() => dataStore.getStorageInfo())
+const storageInfo = computed(() => dataStore.storageInfo.value)
 
 // Toast utility
 const showToastMessage = (message: string, type: 'success' | 'error' = 'success') => {
@@ -161,7 +161,7 @@ const exportData = () => {
 }
 
 const clearFavorites = () => {
-  const success = dataStore.saveFavorites([])
+  const success = dataStore.clearFavorites()
   if (success) {
     showToastMessage('Favorites cleared')
   } else {
