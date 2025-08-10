@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useMouse, useEventListener } from '@vueuse/core'
 import CreatureSelect from '@/components/CreatureSelect.vue'
 import RollTable from '@/components/RollTable.vue'
+import EnemyInfo from '@/components/EnemyInfo.vue'
 import Animate from '@/components/Animate.vue'
 import CreatureCard from '@/components/CreatureCard.vue'
 import CounterConfirm from '@/components/CounterConfirm.vue'
@@ -698,6 +699,12 @@ const handleRollSuccess = (rollValue: number): void => {
   checkAndSetAC()
 }
 
+const handleSetEnemyAC = (ac: number): void => {
+  if (selectedEnemy.value) {
+    selectedEnemy.value.ac = ac
+  }
+}
+
 // Function to automatically determine and set AC when possible
 const checkAndSetAC = (): void => {
   if (!selectedEnemy.value || selectedEnemy.value.ac !== null) return
@@ -1112,15 +1119,36 @@ const buttonProps = (style?: ButtonStyle) => {
           leave-to-class="opacity-0 translate-x-full">
           <SideMenu
             v-if="showFightMenu"
-            position="right">
+            position="right"
+            :fullHeight="true">
             <div class="p-4 space-y-4">
-              <span class="flex gap-1 items-end">
-                <h4 class="text-lg font-semibold">{{ attackingCreatures.length }}</h4>
-                <p>selected</p>
-              </span>
+              <!-- Attack Setup Section -->
+              <div class="bg-gradient-to-r from-zinc-700 to-zinc-600 p-4 rounded-xl border border-zinc-500">
+                <div class="flex items-center justify-between mb-4">
+                  <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-center w-8 h-8 bg-green-500 rounded-lg">
+                      <span class="text-sm font-bold text-white">⚡</span>
+                    </div>
+                    <div>
+                      <h5 class="text-lg font-semibold text-white">Battle Setup</h5>
+                      <p class="text-xs text-gray-300">Configure attack modifiers and roll</p>
+                    </div>
+                  </div>
+                  
+                  <!-- Selected Count -->
+                  <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-center w-10 h-10 bg-zinc-600 rounded-lg border border-zinc-500">
+                      <span class="text-lg font-bold text-white">{{ attackingCreatures.length }}</span>
+                    </div>
+                    <div class="text-right">
+                      <div class="text-sm font-medium text-white">Selected</div>
+                      <div class="text-xs text-gray-300">Creatures</div>
+                    </div>
+                  </div>
+                </div>
 
-              <div class="flex flex-col gap-2">
-                <span class="flex gap-2">
+                <!-- Controls Row -->
+                <div class="flex items-center gap-3">
                   <Button
                     outline
                     success
@@ -1135,102 +1163,295 @@ const buttonProps = (style?: ButtonStyle) => {
                     text="Disadvantage"
                     @click="handleToggle('disadvantage')" />
 
+                  <div class="flex-1"></div>
+
                   <Button
-                    asIcon
-                    info
                     :disabled="!selectedEnemy || selectedAttacks.length === 0"
+                    :class="[
+                      'px-4 py-2 rounded-lg font-semibold transition-all duration-200 transform hover:scale-105 flex items-center gap-2',
+                      !selectedEnemy || selectedAttacks.length === 0
+                        ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/30 hover:from-blue-400 hover:to-blue-500'
+                    ]"
                     @click="rollToHit(20)">
-                    <DiceIcon />
+                    <DiceIcon class="w-4 h-4" />
+                    <span>Roll Attack</span>
                   </Button>
-                </span>
+                </div>
               </div>
 
               <hr class="h-px border-0 bg-zinc-500 my-2" />
 
-              <div class="overflow-y-auto h-60">
-                <RollTable
-                  :attackRolls="attackRolls"
-                  :disAdvantage="disAdvantage"
-                  :advantage="advantage"
-                  :attackModifier="selectedAttack?.attackModifier || 0"
-                  :availableAttacks="availableAttacks"
-                  :selectedAttack="selectedAttack"
-                  :selectedAttacks="selectedAttacks"
-                  :conditionalDamageOptions="conditionalDamageOptions"
-                  :selectedConditionalDamage="selectedConditionalDamage"
-                  :selectedConditionalDamageMap="selectedConditionalDamageMap"
-                  :attacksWithConditionals="attacksWithConditionals"
-                  @selectAttack="setSelectedAttack"
-                  @toggleAttackSelection="toggleAttackSelection"
-                  @selectConditionalDamage="setSelectedConditionalDamage"
-                  @selectConditionalDamageForAttack="setSelectedConditionalDamageForAttack" />
-              </div>
+              <!-- Attack Selection Area -->
+              <RollTable
+                :attackRolls="attackRolls"
+                :disAdvantage="disAdvantage"
+                :advantage="advantage"
+                :attackModifier="selectedAttack?.attackModifier || 0"
+                :availableAttacks="availableAttacks"
+                :selectedAttack="selectedAttack"
+                :selectedAttacks="selectedAttacks"
+                :conditionalDamageOptions="conditionalDamageOptions"
+                :selectedConditionalDamage="selectedConditionalDamage"
+                :selectedConditionalDamageMap="selectedConditionalDamageMap"
+                :attacksWithConditionals="attacksWithConditionals"
+                :showResultsTable="false"
+                @selectAttack="setSelectedAttack"
+                @toggleAttackSelection="toggleAttackSelection"
+                @selectConditionalDamage="setSelectedConditionalDamage"
+                @selectConditionalDamageForAttack="setSelectedConditionalDamageForAttack" />
 
-              <div class="space-y-4">
-                <h4>Rolls vs AC {{ selectedEnemy?.ac || '??' }}</h4>
-                <div class="flex flex-wrap gap-6">
-                  <div
-                    v-for="roll in flattenedRolls"
-                    :key="roll"
-                    :class="[
-                      'relative flex items-center justify-center w-10 h-10 rounded-full text-center font-medium',
-                      // Check if this roll is a critical hit
-                      attackRolls.some(r => r.final === roll && r.isCritical)
-                        ? 'bg-yellow-500 text-black font-bold border-2 border-yellow-300'
-                        : attackRolls.some(r => r.final === roll && r.hit) 
-                          ? 'bg-emerald-500 text-white' 
-                          : 'bg-rose-500 text-white'
-                    ]">
-                    <button
-                      class="absolute flex justify-center items-center -left-2 -top-1 w-4 h-4 bg-rose-400 rounded-full text-xs font-bold"
-                      @click="() => handleRollMiss(roll)">
-                      ×
-                    </button>
-                    {{ roll }}
-                    <button
-                      class="absolute flex justify-center items-center -right-2 -top-1 w-4 h-4 bg-emerald-400 rounded-full text-xs font-bold"
-                      @click="() => handleRollSuccess(roll)">
-                      ✓
-                    </button>
+              <!-- Always Visible Attack Results Table -->
+              <div v-if="attackRolls.length > 0" class="mt-4 bg-gradient-to-r from-zinc-700 to-zinc-600 rounded-xl border border-zinc-500 overflow-hidden">
+                <div class="bg-zinc-800/80 p-4 border-b border-zinc-600">
+                  <div class="flex items-center gap-2">
+                    <div class="flex items-center justify-center w-8 h-8 bg-orange-500 rounded-lg">
+                      <span class="text-sm font-bold text-white">🎲</span>
+                    </div>
+                    <div>
+                      <h5 class="text-lg font-semibold text-white">Attack Roll Results</h5>
+                      <p class="text-xs text-gray-300">Individual creature attack outcomes</p>
+                    </div>
                   </div>
                 </div>
                 
-                <div class="text-sm text-gray-300">
-                  Hits: {{ attackRolls.filter(r => r.hit).length }} / {{ attackRolls.length }}
-                  <span v-if="attackRolls.some(r => r.isCritical && r.hit)" class="text-yellow-300 ml-2">
-                    ({{ attackRolls.filter(r => r.isCritical && r.hit).length }} Critical!)
-                  </span>
+                <div class="overflow-x-auto">
+                  <table class="w-full">
+                    <thead>
+                      <tr class="bg-zinc-800/60">
+                        <th class="text-left p-4 text-sm font-semibold text-gray-200 border-b border-zinc-600">Creature</th>
+
+                        <template v-if="advantage || disAdvantage">
+                          <th class="text-center p-4 text-sm font-semibold text-gray-200 border-b border-zinc-600">
+                            <div class="flex items-center justify-center gap-1">
+                              <span class="text-rose-400">📉</span>
+                              <span>Disadvantage</span>
+                            </div>
+                          </th>
+                          <th class="text-center p-4 text-sm font-semibold text-gray-200 border-b border-zinc-600">
+                            <div class="flex items-center justify-center gap-1">
+                              <span class="text-emerald-400">📈</span>
+                              <span>Advantage</span>
+                            </div>
+                          </th>
+                        </template>
+
+                        <th v-else class="text-center p-4 text-sm font-semibold text-gray-200 border-b border-zinc-600">
+                          <div class="flex items-center justify-center gap-1">
+                            <span>🎯</span>
+                            <span>Roll</span>
+                          </div>
+                        </th>
+                        
+                        <th class="text-center p-4 text-sm font-semibold text-gray-200 border-b border-zinc-600">
+                          <div class="flex items-center justify-center gap-1">
+                            <span>⚡</span>
+                            <span>Final</span>
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+
+                    <tbody class="divide-y divide-zinc-600/30">
+                      <tr
+                        v-for="roll in attackRolls"
+                        :key="`${roll.creature.uuid}-${roll.roll}`"
+                        :class="[
+                          'hover:bg-zinc-600/20 transition-colors',
+                          roll.hit 
+                            ? roll.isCritical 
+                              ? 'bg-yellow-500/10 border-l-4 border-yellow-400' 
+                              : 'bg-emerald-500/10 border-l-4 border-emerald-400'
+                            : 'bg-rose-500/10 border-l-4 border-rose-400'
+                        ]">
+                        
+                        <td class="p-3">
+                          <div class="text-sm font-medium text-white">
+                            {{ `${roll.creature.name} ${roll.creature.index}` }}
+                          </div>
+                        </td>
+
+                        <template v-if="advantage || disAdvantage">
+                          <td :class="[
+                            'p-3 text-center font-mono text-lg font-bold',
+                            disAdvantage ? 'text-rose-300 bg-rose-500/20' : 'text-gray-400'
+                          ]">
+                            <div class="flex items-center justify-center gap-1">
+                              <span>{{ roll.disadvantage }}</span>
+                              <span class="text-xs opacity-60">+{{ selectedAttack?.attackModifier || 0 }}</span>
+                            </div>
+                          </td>
+
+                          <td :class="[
+                            'p-3 text-center font-mono text-lg font-bold',
+                            advantage 
+                              ? roll.advantage === 20 
+                                ? 'text-yellow-300 bg-yellow-500/20' 
+                                : 'text-emerald-300 bg-emerald-500/20'
+                              : 'text-gray-400'
+                          ]">
+                            <div class="flex items-center justify-center gap-1">
+                              <span :class="{ 'text-yellow-300': roll.advantage === 20 }">
+                                {{ roll.advantage }}
+                              </span>
+                              <span class="text-xs opacity-60">+{{ selectedAttack?.attackModifier || 0 }}</span>
+                            </div>
+                          </td>
+                        </template>
+
+                        <td v-else :class="[
+                          'p-3 text-center font-mono text-lg font-bold',
+                          roll.roll === 20 ? 'text-yellow-300 bg-yellow-500/20' : 'text-blue-300'
+                        ]">
+                          <div class="flex items-center justify-center gap-1">
+                            <span>{{ roll.roll }}</span>
+                            <span class="text-xs opacity-60">+{{ selectedAttack?.attackModifier || 0 }}</span>
+                          </div>
+                        </td>
+
+                        <td class="p-3 text-center">
+                          <div class="flex items-center justify-center gap-2">
+                            <span :class="[
+                              'font-mono text-xl font-bold',
+                              roll.hit 
+                                ? roll.isCritical
+                                  ? 'text-yellow-300'
+                                  : 'text-emerald-300'
+                                : 'text-rose-300'
+                            ]">
+                              {{ roll.final }}
+                            </span>
+                            
+                            <span :class="[
+                              'text-xs px-2 py-1 rounded font-semibold',
+                              roll.hit 
+                                ? roll.isCritical
+                                  ? 'bg-yellow-500 text-black'
+                                  : 'bg-emerald-500 text-white'
+                                : 'bg-rose-500 text-white'
+                            ]">
+                              {{ roll.isCritical ? 'CRIT' : roll.hit ? 'HIT' : 'MISS' }}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
-              <h4>Damage</h4>
-              <div class="flex justify-between">
-                <div class="flex gap-2">
-                  <Button
-                    @click="rollDamage"
-                    :disabled="!canRollDamage"
-                    info
-                    text="Roll Damage" />
-                  
-                  <Button
-                    v-if="damageDetails.length > 0"
-                    @click="showDamageBreakdown = true"
-                    outline
-                    info
-                    text="Breakdown" />
-                </div>
-
-                <div class="flex">
-                  <div class="flex flex-col pr-4 border-r-2 border-white">
-                    <div
-                      v-for="(damageAmount, type) in damageSplit"
-                      :key="type"
-                      class="flex gap-1 items-center">
-                      <h3 class="text-sm">{{ damageAmount }}</h3>
-                      <span class="text-xs">{{ type }}</span>
+              <!-- Enemy AC & Roll Results Section -->
+              <div class="bg-zinc-600 p-4 rounded-lg space-y-4">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="flex items-center justify-center w-12 h-12 bg-zinc-700 rounded-full border-2 border-zinc-500">
+                      <span class="text-2xl font-bold text-white">{{ selectedEnemy?.ac || '??' }}</span>
+                    </div>
+                    <div>
+                      <h4 class="text-lg font-medium text-white">Target AC</h4>
+                      <p class="text-sm text-gray-300">{{ selectedEnemy?.name || 'Unknown Enemy' }}</p>
                     </div>
                   </div>
-                  <h2 class="pl-2 text-2xl">{{ damage }}</h2>
+                  
+                  <!-- Hit/Miss Summary -->
+                  <div class="text-right">
+                    <div class="flex items-center gap-2 mb-1">
+                      <div class="flex items-center gap-1">
+                        <div class="w-3 h-3 bg-emerald-500 rounded-full"></div>
+                        <span class="text-sm font-medium text-white">{{ attackRolls.filter(r => r.hit).length }}</span>
+                      </div>
+                      <span class="text-gray-400">/</span>
+                      <div class="flex items-center gap-1">
+                        <div class="w-3 h-3 bg-rose-500 rounded-full"></div>
+                        <span class="text-sm font-medium text-white">{{ attackRolls.filter(r => !r.hit).length }}</span>
+                      </div>
+                    </div>
+                    <p class="text-xs text-gray-300">Hits / Misses</p>
+                    <div v-if="attackRolls.some(r => r.isCritical && r.hit)" class="flex items-center gap-1 mt-1">
+                      <div class="w-3 h-3 bg-yellow-500 rounded-full"></div>
+                      <span class="text-xs text-yellow-300 font-medium">{{ attackRolls.filter(r => r.isCritical && r.hit).length }} Critical!</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Roll Dice Display -->
+                <div class="border-t border-zinc-500 pt-4">
+                  <h5 class="text-sm font-medium text-white mb-3">Attack Rolls</h5>
+                  <div class="flex flex-wrap gap-3">
+                    <div
+                      v-for="roll in flattenedRolls"
+                      :key="roll"
+                      class="relative group">
+                      <div
+                        :class="[
+                          'flex items-center justify-center w-14 h-14 rounded-xl text-lg font-bold transition-all duration-200 transform group-hover:scale-105',
+                          // Check if this roll is a critical hit
+                          attackRolls.some(r => r.final === roll && r.isCritical)
+                            ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-black shadow-lg shadow-yellow-500/30 border-2 border-yellow-300'
+                            : attackRolls.some(r => r.final === roll && r.hit) 
+                              ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-500/30' 
+                              : 'bg-gradient-to-br from-rose-500 to-rose-600 text-white shadow-lg shadow-rose-500/30'
+                        ]">
+                        {{ roll }}
+                      </div>
+                      
+                      <!-- Manual Override Buttons -->
+                      <button
+                        class="absolute -left-1 -top-1 flex justify-center items-center w-5 h-5 bg-rose-500 hover:bg-rose-400 rounded-full text-xs font-bold text-white transition-colors shadow-md opacity-0 group-hover:opacity-100"
+                        @click="() => handleRollMiss(roll)"
+                        title="Mark as Miss">
+                        ×
+                      </button>
+                      <button
+                        class="absolute -right-1 -top-1 flex justify-center items-center w-5 h-5 bg-emerald-500 hover:bg-emerald-400 rounded-full text-xs font-bold text-white transition-colors shadow-md opacity-0 group-hover:opacity-100"
+                        @click="() => handleRollSuccess(roll)"
+                        title="Mark as Hit">
+                        ✓
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <p class="text-xs text-gray-400 mt-3 italic">Hover over rolls to manually mark as hit/miss</p>
+                </div>
+              </div>
+
+              <!-- Damage Section -->
+              <div class="bg-zinc-700 p-4 rounded-lg border border-zinc-600">
+                <h4 class="text-lg font-medium text-white mb-4">Damage</h4>
+                
+                <div class="flex justify-between items-center">
+                  <div class="flex gap-2">
+                    <Button
+                      @click="rollDamage"
+                      :disabled="!canRollDamage"
+                      info
+                      text="Roll Damage" />
+                    
+                    <Button
+                      v-if="damageDetails.length > 0"
+                      @click="showDamageBreakdown = true"
+                      outline
+                      info
+                      text="Breakdown" />
+                  </div>
+
+                  <!-- Damage Display -->
+                  <div class="flex items-center gap-4">
+                    <!-- Damage Type Breakdown -->
+                    <div v-if="Object.keys(damageSplit).length > 0" 
+                         class="flex flex-col gap-1 pr-4 border-r-2 border-zinc-500">
+                      <div
+                        v-for="(damageAmount, type) in damageSplit"
+                        :key="type"
+                        class="flex gap-1 items-center">
+                        <h3 class="text-sm font-medium text-white">{{ damageAmount }}</h3>
+                        <span class="text-xs text-gray-300 capitalize">{{ type }}</span>
+                      </div>
+                    </div>
+                    
+                    <!-- Total Damage -->
+                    <h2 class="pl-2 text-2xl font-bold text-white">{{ damage || 0 }}</h2>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1243,28 +1464,12 @@ const buttonProps = (style?: ButtonStyle) => {
       <div
         v-if="enemies.length"
         class="flex flex-col justify-center items-center gap-4 h-full">
-        <div class="flex flex-col bg-slate-500 w-fit p-2">
-        <h3>Enemy AC: {{ selectedEnemy?.ac ?? '??' }}</h3>
-        
-        <div v-if="selectedEnemy?.missedRolls?.length">
-          <h4 class="text-sm font-medium">Missed Rolls:</h4>
-          <span class="text-sm">{{ missedEnemyRolls.join(', ') }}</span>
-        </div>
-        
-        <div v-if="selectedEnemy?.hitRolls?.length">
-          <h4 class="text-sm font-medium">Hit Rolls:</h4>
-          <span class="text-sm">{{ hitEnemyRolls.join(', ') }}</span>
-        </div>
-        
-        <div v-if="suggestedAC" class="mt-2 p-2 bg-blue-600 rounded">
-          <h4 class="text-sm font-medium">Suggested AC: {{ suggestedAC }}</h4>
-          <button 
-            @click="selectedEnemy!.ac = suggestedAC"
-            class="text-xs bg-blue-500 px-2 py-1 rounded mt-1">
-            Set AC
-          </button>
-        </div>
-      </div>
+        <EnemyInfo
+          :selectedEnemy="selectedEnemy"
+          :hitEnemyRolls="hitEnemyRolls"
+          :missedEnemyRolls="missedEnemyRolls"
+          :suggestedAC="suggestedAC"
+          @setAC="handleSetEnemyAC" />
         <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
           <CreatureCard
             v-for="(enemy, idx) in enemies"

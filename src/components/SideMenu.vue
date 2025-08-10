@@ -27,7 +27,7 @@ const menuClass = () => {
   
   // Only add full height classes when explicitly requested
   if (props.fullHeight) {
-    styles.push('h-full', 'max-h-screen');
+    styles.push('h-full', 'max-h-screen', 'overflow-y-auto');
   }
 
   switch (props.position) {
@@ -56,5 +56,27 @@ const menuClass = () => {
 </template>
 
 <style scoped>
-/* Minimal CSS to not interfere with animations */
+/* Custom scrollbar styling for fullHeight menus */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 8px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: #3f3f46;
+  border-radius: 4px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #71717a;
+  border-radius: 4px;
+  border: 1px solid #52525b;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:active {
+  background: #d4d4d8;
+}
 </style>
