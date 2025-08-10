@@ -8,8 +8,14 @@ import { useDataStore } from '@/composables/useDataStore'
 
 import type { Creature } from '@/types/Creatures'
 
+interface CreatureSelection {
+  creature: Creature
+  count: number
+}
+
 const emits = defineEmits<{
   summon: [count: number, creature: Creature]
+  summonMultiple: [selections: CreatureSelection[]]
 }>()
 
 // Use the new VueUse data store
@@ -42,6 +48,10 @@ const detailCreature = ref<Creature | null>(null)
 const summonCount = ref<number>(8)
 const selectedCreature = ref<Creature | null>(null)
 const showImportMode = ref(false)
+
+// Multi-selection state
+const selectedCreatures = ref<Map<string, CreatureSelection>>(new Map())
+const multiSelectMode = ref<boolean>(false)
 
 // Available filter options
 const availableTypes = ['beast', 'fey', 'monstrosity', 'elemental', 'celestial', 'fiend', 'undead', 'humanoid', 'dragon', 'giant', 'aberration', 'construct', 'ooze', 'plant']
@@ -263,6 +273,44 @@ const summon = (): void => {
   }
 }
 
+const summonMultiple = (): void => {
+  const selections = Array.from(selectedCreatures.value.values())
+  if (selections.length > 0) {
+    emits('summonMultiple', selections)
+  }
+}
+
+const toggleCreatureSelection = (creature: Creature, event: Event): void => {
+  event.stopPropagation()
+  
+  if (selectedCreatures.value.has(creature.id)) {
+    selectedCreatures.value.delete(creature.id)
+  } else {
+    selectedCreatures.value.set(creature.id, {
+      creature,
+      count: 1
+    })
+  }
+}
+
+const updateCreatureCount = (creatureId: string, count: number): void => {
+  const selection = selectedCreatures.value.get(creatureId)
+  if (selection) {
+    selection.count = count
+  }
+}
+
+const clearAllSelections = (): void => {
+  selectedCreatures.value.clear()
+}
+
+const toggleMultiSelectMode = (): void => {
+  multiSelectMode.value = !multiSelectMode.value
+  if (!multiSelectMode.value) {
+    selectedCreatures.value.clear()
+  }
+}
+
 const handleImporterClose = () => {
   showImportMode.value = false
 }
@@ -271,6 +319,18 @@ const handleImporterClose = () => {
 const disableSummon = computed<boolean>(() => {
   return !selectedCreature.value
 })
+
+const disableSummonMultiple = computed<boolean>(() => {
+  return selectedCreatures.value.size === 0
+})
+
+const totalCreaturesToSummon = computed<number>(() => {
+  return Array.from(selectedCreatures.value.values()).reduce((total, selection) => total + selection.count, 0)
+})
+
+const isCreatureSelected = (creature: Creature): boolean => {
+  return selectedCreatures.value.has(creature.id)
+}
 
 // Active filters count for UI
 const activeFiltersCount = computed(() => {
@@ -303,14 +363,16 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-4 max-w-4xl">
+  <div class="flex flex-col h-full max-w-4xl overflow-hidden">
     <!-- Show DataImporter only when explicitly in import mode -->
     <div v-if="showImportMode">
       <DataImporter @close="handleImporterClose" />
     </div>
 
     <!-- Show normal creature browser when NOT in import mode -->
-    <div v-else>
+    <div v-else class="flex flex-col h-full">
+      <!-- Fixed header content -->
+      <div class="p-4 border-b border-zinc-600">
       <!-- Search Bar -->
       <div class="mb-4">
         <div class="relative">
@@ -336,6 +398,15 @@ onMounted(() => {
             class="text-sm"
           >
             ⭐ Favorites {{ favorites.length > 0 ? `(${favorites.length})` : '' }}
+          </Button>
+          
+          <Button
+            :primary="multiSelectMode"
+            :outline="!multiSelectMode"
+            @click="toggleMultiSelectMode"
+            class="text-sm"
+          >
+            {{ multiSelectMode ? '☑️ Multi-Select' : '☐ Multi-Select' }}
           </Button>
           
           <Button
@@ -438,6 +509,10 @@ onMounted(() => {
           </div>
         </div>
       </div>
+      </div>
+
+      <!-- Scrollable content area -->
+      <div class="flex-1 overflow-y-auto p-4 min-h-0">
 
       <!-- Results Loading State -->
       <div v-if="loading" class="text-center py-8">
@@ -498,6 +573,16 @@ onMounted(() => {
             @click="showCreatureDetails(creature)"
           >
             <div class="flex items-center gap-3 min-w-0 flex-1">
+              <!-- Multi-select checkbox -->
+              <div v-if="multiSelectMode" class="flex items-center">
+                <input
+                  type="checkbox"
+                  :checked="isCreatureSelected(creature)"
+                  @click="toggleCreatureSelection(creature, $event)"
+                  class="w-4 h-4 text-blue-600 bg-zinc-700 border-zinc-500 rounded focus:ring-blue-500 focus:ring-2"
+                />
+              </div>
+              
               <!-- Favorite Star -->
               <button
                 @click="toggleFavorite(creature, $event)"
@@ -528,6 +613,27 @@ onMounted(() => {
               </div>
             </div>
 
+            <!-- Multi-select quantity counter -->
+            <div v-if="multiSelectMode && isCreatureSelected(creature)" class="mr-4">
+              <div class="flex items-center gap-2 bg-zinc-700 rounded px-2 py-1">
+                <button
+                  @click.stop="updateCreatureCount(creature.id, Math.max(1, (selectedCreatures.get(creature.id)?.count || 1) - 1))"
+                  class="w-6 h-6 bg-zinc-600 hover:bg-zinc-500 rounded flex items-center justify-center text-sm"
+                >
+                  -
+                </button>
+                <span class="text-sm font-medium min-w-[1.5rem] text-center">
+                  {{ selectedCreatures.get(creature.id)?.count || 1 }}
+                </span>
+                <button
+                  @click.stop="updateCreatureCount(creature.id, (selectedCreatures.get(creature.id)?.count || 1) + 1)"
+                  class="w-6 h-6 bg-zinc-600 hover:bg-zinc-500 rounded flex items-center justify-center text-sm"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            
             <!-- Quick Info -->
             <div class="text-right text-xs ml-4">
               <div class="text-lg font-medium text-white mb-1">CR {{ creature.cr }}</div>
@@ -537,24 +643,88 @@ onMounted(() => {
           </div>
         </div>
       </div>
+      </div>
 
-      <!-- Summon Button -->
-      <div class="flex justify-between items-center pt-4 border-t border-zinc-600 mt-4">
-        <div v-if="selectedCreature" class="text-sm text-gray-300">
-          Selected: <span class="text-white font-medium">{{ selectedCreature.name }}</span>
-        </div>
-        <div v-else class="text-sm text-gray-500">
-          Click a creature to select
+      <!-- Fixed footer with summon controls -->
+      <div class="border-t border-zinc-600 p-4">
+        <!-- Multi-Select Summon Queue -->
+        <div v-if="multiSelectMode && selectedCreatures.size > 0" class="bg-zinc-700 rounded-lg p-4 mb-4">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm font-medium">Summon Queue ({{ totalCreaturesToSummon }} total)</h3>
+          <Button
+            outline
+            danger
+            @click="clearAllSelections"
+            class="text-xs py-1 px-2"
+          >
+            Clear All
+          </Button>
         </div>
         
-        <Button
-          primary
-          :disabled="disableSummon"
-          @click="summon()"
-          class="px-6"
-        >
-          Summon {{ summonCount }} {{ selectedCreature?.name || 'Creature' }}{{ summonCount > 1 ? 's' : '' }}
-        </Button>
+        <div class="space-y-2 max-h-40 overflow-y-auto">
+          <div
+            v-for="selection in Array.from(selectedCreatures.values())"
+            :key="selection.creature.id"
+            class="flex items-center justify-between bg-zinc-600 rounded px-3 py-2"
+          >
+            <div class="flex items-center gap-3">
+              <span class="font-medium text-sm">{{ selection.creature.name }}</span>
+              <span class="text-xs text-gray-400">CR {{ selection.creature.cr }}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium">{{ selection.count }}</span>
+              <button
+                @click="selectedCreatures.delete(selection.creature.id)"
+                class="text-red-400 hover:text-red-300 text-xs"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Summon Buttons -->
+      <div class="flex justify-between items-center pt-4 border-t border-zinc-600 mt-4">
+        <!-- Single Select Mode -->
+        <div v-if="!multiSelectMode">
+          <div v-if="selectedCreature" class="text-sm text-gray-300">
+            Selected: <span class="text-white font-medium">{{ selectedCreature.name }}</span>
+          </div>
+          <div v-else class="text-sm text-gray-500">
+            Click a creature to select
+          </div>
+        </div>
+        
+        <!-- Multi Select Mode -->
+        <div v-else class="text-sm text-gray-300">
+          {{ selectedCreatures.size }} creature type{{ selectedCreatures.size !== 1 ? 's' : '' }} selected
+        </div>
+        
+        <div class="flex gap-2">
+          <!-- Single Summon Button -->
+          <Button
+            v-if="!multiSelectMode"
+            primary
+            :disabled="disableSummon"
+            @click="summon()"
+            class="px-6"
+          >
+            Summon {{ summonCount }} {{ selectedCreature?.name || 'Creature' }}{{ summonCount > 1 ? 's' : '' }}
+          </Button>
+          
+          <!-- Multi Summon Button -->
+          <Button
+            v-else
+            primary
+            :disabled="disableSummonMultiple"
+            @click="summonMultiple()"
+            class="px-6"
+          >
+            Summon All ({{ totalCreaturesToSummon }})
+          </Button>
+        </div>
+      </div>
       </div>
     </div>
 

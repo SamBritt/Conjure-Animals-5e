@@ -5,6 +5,10 @@ const props = defineProps({
   position: {
     type: String,
     default: 'left'
+  },
+  fullHeight: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -20,6 +24,11 @@ const menuClass = () => {
     `text-zinc-100`,
     `shadow-lg`
   ];
+  
+  // Only add full height classes when explicitly requested
+  if (props.fullHeight) {
+    styles.push('h-full', 'max-h-screen');
+  }
 
   switch (props.position) {
     case 'left':

@@ -21,7 +21,7 @@ const props = defineProps<Props>()
       {{ title }}
     </h3>
     <div v-for="trait in traits" :key="trait.name" class="mb-3">
-      <p class="text-yellow-300 font-semibold italic">{{ trait.name }}.</p>
+      <p class="text-yellow-300 font-semibold italic">{{ trait.name }}</p>
       <p class="text-sm leading-relaxed">{{ trait.text }}</p>
     </div>
   </div>

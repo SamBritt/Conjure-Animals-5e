@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useMouse, useEventListener } from '@vueuse/core'
 import CreatureSelect from '@/components/CreatureSelect.vue'
 import RollTable from '@/components/RollTable.vue'
@@ -17,6 +17,7 @@ import PlusIcon from '../assets/plus3.svg?component'
 import DiceIcon from '../assets/dice.svg?component'
 import CheckIcon from '../assets/check.svg?component'
 import DamageBreakdown from '@/components/DamageBreakdown.vue'
+import DiceRollToast from '@/components/DiceRollToast.vue'
 import type { AbilityKey, Creature, Attack, ActionDamage } from '@/types/Creatures'
 
 // Add this interface for summoned creatures
@@ -25,6 +26,12 @@ export interface SummonedCreature extends Creature {
   tempHP?: number
   maxHP: number  // Store original HP for healing calculations
   uuid: string   // Unique identifier that doesn't change when creatures die
+}
+
+// Interface for multi-creature summoning
+interface CreatureSelection {
+  creature: Creature
+  count: number
 }
 
 // Define additional interfaces for your component
@@ -114,7 +121,9 @@ const disAdvantage = ref<boolean>(false)
 const advantage = ref<boolean>(false)
 
 const selectedAttack = ref<AvailableAttack | undefined>()
+const selectedAttacks = ref<AvailableAttack[]>([])
 const selectedConditionalDamage = ref<ActionDamage | undefined>()
+const selectedConditionalDamageMap = ref<Map<string, ActionDamage>>(new Map())
 const damage = ref<number>(0)
 const damageSplit = ref<DamageSplit>({})
 const damageDetails = ref<DamageDetail[]>([])
@@ -157,6 +166,36 @@ const loadSummons = (count: number, creature: Creature): void => {
       special: creature.hp.special 
     }  // Deep copy the HP object
   }))
+  openCreatureSelect()
+}
+
+const loadMultipleSummons = (selections: CreatureSelection[]): void => {
+  // Clear any existing selections when loading new creatures
+  attackingCreatures.value = []
+  
+  let allCreatures: SummonedCreature[] = []
+  let globalIndex = 1
+  
+  // Create creatures for each selection
+  selections.forEach(selection => {
+    const creaturesOfThisType = Array.from({ length: selection.count }, (_, localIndex): SummonedCreature => ({
+      ...selection.creature,
+      index: globalIndex + localIndex,
+      maxHP: selection.creature.hp.average,
+      uuid: `${selection.creature.id}-${globalIndex + localIndex}-${Date.now()}`,
+      hp: {
+        average: selection.creature.hp.average,
+        formula: selection.creature.hp.formula,
+        special: selection.creature.hp.special
+      }
+    }))
+    
+    allCreatures = [...allCreatures, ...creaturesOfThisType]
+    globalIndex += selection.count
+  })
+  
+  creatures.value = allCreatures
+  summonCount.value = allCreatures.length
   openCreatureSelect()
 }
 
@@ -518,32 +557,41 @@ const rollDamage = (): void => {
   const damageRolls: DamageRoll[] = []
   const newDamageDetails: DamageDetail[] = []
 
-  // Only roll for creatures that hit AND match the selected attack's creature type
-  attackRolls.value
-    .filter(rollData => 
-      rollData.hit && 
-      rollData.creature.name === selectedAttack.value!.creature
-    )
-    .forEach((rollData) => {
-      // Find the specific attack that matches the selected attack
-      const attack = rollData.creature.actions.attacks.find(
-        attack => attack.name === selectedAttack.value!.name
+  // Roll damage for all selected attacks from creatures that hit
+  selectedAttacks.value.forEach(selectedAttack => {
+    attackRolls.value
+      .filter(rollData => 
+        rollData.hit && 
+        rollData.creature.name === selectedAttack.creature
       )
+      .forEach((rollData) => {
+        // Find the specific attack that matches the current selected attack
+        const attack = rollData.creature.actions.attacks.find(
+          attack => attack.name === selectedAttack.name
+        )
 
-      if (attack) {
-        const creatureDamageRolls: DamageDetail['damageRolls'] = []
-        let creatureTotalDamage = 0
+        if (attack) {
+          const creatureDamageRolls: DamageDetail['damageRolls'] = []
+          let creatureTotalDamage = 0
 
         // Determine which damage entries to process
         let damageEntriesToProcess: ActionDamage[]
 
-        if (attack.damageType === 'conditional' && selectedConditionalDamage.value) {
-          // For conditional attacks, only process the selected conditional damage
-          damageEntriesToProcess = [selectedConditionalDamage.value]
+        if (attack.damageType === 'conditional') {
+          const attackKey = `${selectedAttack.creature}-${selectedAttack.name}`
+          const selectedConditionalForThisAttack = getSelectedConditionalDamageForAttack(attackKey)
           
-          // Also include any non-conditional damage (like "plus" damage)
-          const nonConditionalDamage = attack.damage.filter(dmg => !dmg.conditional?.isConditional)
-          damageEntriesToProcess.push(...nonConditionalDamage)
+          if (selectedConditionalForThisAttack) {
+            // For conditional attacks, only process the selected conditional damage for this specific attack
+            damageEntriesToProcess = [selectedConditionalForThisAttack]
+            
+            // Also include any non-conditional damage (like "plus" damage)
+            const nonConditionalDamage = attack.damage.filter(dmg => !dmg.conditional?.isConditional)
+            damageEntriesToProcess.push(...nonConditionalDamage)
+          } else {
+            // No conditional damage selected for this attack, skip damage processing
+            damageEntriesToProcess = []
+          }
         } else {
           // For standard attacks, process all damage entries
           damageEntriesToProcess = attack.damage
@@ -586,14 +634,15 @@ const rollDamage = (): void => {
         newDamageDetails.push({
           creatureIndex: rollData.creature.index,
           creatureName: rollData.creature.name,
-          attackName: selectedAttack.value!.name,
+          attackName: selectedAttack.name,
           isCritical: rollData.isCritical,
           rollValue: rollData.finalD20, // Use the actual d20 result that was used
           damageRolls: creatureDamageRolls,
           totalDamage: creatureTotalDamage
         })
-      }
-    })
+        }
+      })
+  })
 
   // Calculate totals
   const totalSum = damageRolls.reduce((sum, dmg) => sum + dmg.total, 0)
@@ -674,8 +723,139 @@ const setSelectedAttack = (attack: AvailableAttack): void => {
   selectedConditionalDamage.value = undefined
 }
 
+const toggleAttackSelection = (attack: AvailableAttack): void => {
+  const index = selectedAttacks.value.findIndex(a => 
+    a.creature === attack.creature && a.name === attack.name
+  )
+  
+  if (index !== -1) {
+    // Attack is selected - check if this creature has other attacks available
+    const otherAttacksForCreature = availableAttacks.value.filter(a => 
+      a.creature === attack.creature && a.name !== attack.name
+    )
+    
+    if (otherAttacksForCreature.length > 0) {
+      // Replace with the first alternative attack for this creature
+      const newAttack = otherAttacksForCreature[0]
+      selectedAttacks.value[index] = newAttack
+      
+      // Preselect conditional damage for the new attack if it has conditional damage
+      preselectConditionalDamageForAttack(newAttack)
+    }
+    // If no other attacks exist, keep this one selected (can't deselect)
+  } else {
+    // Check if we already have an attack selected for this creature
+    const existingIndex = selectedAttacks.value.findIndex(a => a.creature === attack.creature)
+    if (existingIndex !== -1) {
+      // Replace existing attack for this creature
+      selectedAttacks.value[existingIndex] = attack
+    } else {
+      // Add new attack for this creature
+      selectedAttacks.value.push(attack)
+    }
+    
+    // Preselect conditional damage for the newly selected attack
+    preselectConditionalDamageForAttack(attack)
+  }
+  
+  // Update primary selected attack for conditional damage
+  if (selectedAttacks.value.length > 0) {
+    selectedAttack.value = selectedAttacks.value[0]
+  } else {
+    selectedAttack.value = undefined
+  }
+  
+  selectedConditionalDamage.value = undefined
+}
+
+const preselectConditionalDamageForAttack = (attack: AvailableAttack): void => {
+  const creature = attackingCreatures.value.find(c => c.name === attack.creature)
+  if (!creature) return
+  
+  const actualAttack = creature.actions.attacks.find(a => a.name === attack.name)
+  if (actualAttack && actualAttack.damageType === 'conditional') {
+    const conditionalOptions = actualAttack.damage.filter(d => d.conditional?.isConditional)
+    if (conditionalOptions.length > 0) {
+      const attackKey = `${attack.creature}-${attack.name}`
+      // Preselect the first conditional damage option
+      selectedConditionalDamageMap.value.set(attackKey, conditionalOptions[0])
+    }
+  }
+}
+
+const isAttackSelected = (attack: AvailableAttack): boolean => {
+  return selectedAttacks.value.some(a => 
+    a.creature === attack.creature && a.name === attack.name
+  )
+}
+
+// Auto-preselect first attack per creature type
+const autoSelectAttacks = (): void => {
+  if (!availableAttacks.value || availableAttacks.value.length === 0) {
+    selectedAttacks.value = []
+    selectedAttack.value = undefined
+    selectedConditionalDamage.value = undefined
+    selectedConditionalDamageMap.value.clear()
+    return
+  }
+  
+  // Group attacks by creature type
+  const attacksByCreature = new Map<string, AvailableAttack[]>()
+  availableAttacks.value.forEach(attack => {
+    if (!attacksByCreature.has(attack.creature)) {
+      attacksByCreature.set(attack.creature, [])
+    }
+    attacksByCreature.get(attack.creature)!.push(attack)
+  })
+  
+  // Select first attack for each creature type
+  const preselected: AvailableAttack[] = []
+  attacksByCreature.forEach(creatureAttacks => {
+    preselected.push(creatureAttacks[0]) // First attack for each creature
+  })
+  
+  selectedAttacks.value = preselected
+  selectedAttack.value = preselected[0] // Primary for conditional damage
+  selectedConditionalDamage.value = undefined
+  
+  // Auto-select first conditional damage for each attack with conditionals
+  selectedConditionalDamageMap.value.clear()
+  preselected.forEach(attack => {
+    const creature = attackingCreatures.value.find(c => c.name === attack.creature)
+    if (!creature) return
+    
+    const actualAttack = creature.actions.attacks.find(a => a.name === attack.name)
+    if (actualAttack && actualAttack.damageType === 'conditional') {
+      const conditionalOptions = actualAttack.damage.filter(d => d.conditional?.isConditional)
+      if (conditionalOptions.length > 0) {
+        const attackKey = `${attack.creature}-${attack.name}`
+        selectedConditionalDamageMap.value.set(attackKey, conditionalOptions[0])
+      }
+    }
+  })
+}
+
+
 const setSelectedConditionalDamage = (damageOption: ActionDamage): void => {
   selectedConditionalDamage.value = damageOption
+}
+
+const setSelectedConditionalDamageForAttack = (attackKey: string, damageOption: ActionDamage): void => {
+  selectedConditionalDamageMap.value.set(attackKey, damageOption)
+}
+
+const getSelectedConditionalDamageForAttack = (attackKey: string): ActionDamage | undefined => {
+  return selectedConditionalDamageMap.value.get(attackKey)
+}
+
+const getConditionalDamageOptionsForAttack = (attack: AvailableAttack): ActionDamage[] => {
+  const creature = attackingCreatures.value.find(c => c.name === attack.creature)
+  if (!creature) return []
+  
+  const actualAttack = creature.actions.attacks.find(a => a.name === attack.name)
+  if (!actualAttack || actualAttack.damageType !== 'conditional') return []
+  
+  return actualAttack.damage.filter(d => d.conditional?.isConditional)
 }
 
 const flattenedRolls = computed<number[]>(() => {
@@ -735,30 +915,63 @@ const availableAttacks = computed<AvailableAttack[]>(() => {
 })
 
 const conditionalDamageOptions = computed<ActionDamage[]>(() => {
-  if (!selectedAttack.value) return []
+  if (selectedAttacks.value.length === 0) return []
   
-  // Find the actual attack to get damage options
-  const creature = attackingCreatures.value.find(c => c.name === selectedAttack.value!.creature)
-  if (!creature) return []
+  const allConditionalOptions: ActionDamage[] = []
   
-  const attack = creature.actions.attacks.find(a => a.name === selectedAttack.value!.name)
-  if (!attack || attack.damageType !== 'conditional') return []
+  // Check all selected attacks for conditional damage
+  selectedAttacks.value.forEach(selectedAttack => {
+    const creature = attackingCreatures.value.find(c => c.name === selectedAttack.creature)
+    if (!creature) return
+    
+    const attack = creature.actions.attacks.find(a => a.name === selectedAttack.name)
+    if (!attack || attack.damageType !== 'conditional') return
+    
+    // Add conditional damage entries from this attack
+    const conditionalDamage = attack.damage.filter(d => d.conditional?.isConditional)
+    allConditionalOptions.push(...conditionalDamage)
+  })
   
-  // Return only conditional damage entries
-  return attack.damage.filter(d => d.conditional?.isConditional)
+  return allConditionalOptions
+})
+
+const attacksWithConditionals = computed(() => {
+  return selectedAttacks.value
+    .filter(attack => getConditionalDamageOptionsForAttack(attack).length > 0)
+    .map(attack => {
+      const attackKey = `${attack.creature}-${attack.name}`
+      return {
+        attackKey,
+        attack,
+        conditionalOptions: getConditionalDamageOptionsForAttack(attack),
+        selectedConditional: getSelectedConditionalDamageForAttack(attackKey)
+      }
+    })
 })
 
 const canRollDamage = computed<boolean>(() => {
-  if (!selectedAttack.value) return false
+  if (selectedAttacks.value.length === 0) return false
   
-  // For conditional attacks, require conditional damage selection
-  if (conditionalDamageOptions.value.length > 0) {
-    return !!selectedConditionalDamage.value
+  // For conditional attacks, require conditional damage selection per attack
+  for (const attack of selectedAttacks.value) {
+    const conditionalOptions = getConditionalDamageOptionsForAttack(attack)
+    if (conditionalOptions.length > 0) {
+      const attackKey = `${attack.creature}-${attack.name}`
+      const selectedConditional = getSelectedConditionalDamageForAttack(attackKey)
+      if (!selectedConditional) {
+        return false // This attack has conditional damage but no selection made
+      }
+    }
   }
   
-  // For standard attacks, just need an attack selected
+  // All conditional attacks have selections, can roll damage
   return true
 })
+
+// Watch for changes in available attacks and auto-select them
+watch(availableAttacks, () => {
+  autoSelectAttacks()
+}, { immediate: true })
 
 // Selection box style computed property
 const selectionBoxStyle = computed(() => {
@@ -801,7 +1014,7 @@ const buttonProps = (style?: ButtonStyle) => {
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full overflow-hidden">
     <aside class="bg-gray-800 h-screen p-4 flex flex-col relative">
       <div class="flex flex-col gap-4">
         <Button
@@ -871,8 +1084,10 @@ const buttonProps = (style?: ButtonStyle) => {
     <div class="h-full flex flex-col relative w-full">
       <div class="flex">
         <Animate>
-          <SideMenu v-show="showCreatureSelect">
-            <CreatureSelect @summon="(count: number, creature: Creature) => loadSummons(count, creature)" />
+          <SideMenu v-show="showCreatureSelect" :fullHeight="true">
+            <CreatureSelect 
+              @summon="(count: number, creature: Creature) => loadSummons(count, creature)"
+              @summonMultiple="(selections: CreatureSelection[]) => loadMultipleSummons(selections)" />
           </SideMenu>
         </Animate>
 
@@ -923,7 +1138,7 @@ const buttonProps = (style?: ButtonStyle) => {
                   <Button
                     asIcon
                     info
-                    :disabled="!selectedEnemy || !selectedAttack"
+                    :disabled="!selectedEnemy || selectedAttacks.length === 0"
                     @click="rollToHit(20)">
                     <DiceIcon />
                   </Button>
@@ -940,10 +1155,15 @@ const buttonProps = (style?: ButtonStyle) => {
                   :attackModifier="selectedAttack?.attackModifier || 0"
                   :availableAttacks="availableAttacks"
                   :selectedAttack="selectedAttack"
+                  :selectedAttacks="selectedAttacks"
                   :conditionalDamageOptions="conditionalDamageOptions"
                   :selectedConditionalDamage="selectedConditionalDamage"
+                  :selectedConditionalDamageMap="selectedConditionalDamageMap"
+                  :attacksWithConditionals="attacksWithConditionals"
                   @selectAttack="setSelectedAttack"
-                  @selectConditionalDamage="setSelectedConditionalDamage" />
+                  @toggleAttackSelection="toggleAttackSelection"
+                  @selectConditionalDamage="setSelectedConditionalDamage"
+                  @selectConditionalDamageForAttack="setSelectedConditionalDamageForAttack" />
               </div>
 
               <div class="space-y-4">
@@ -1086,6 +1306,9 @@ const buttonProps = (style?: ButtonStyle) => {
       :style="selectionBoxStyle"
       class="selection-box">
     </div>
+    
+    <!-- Dice Roll Toast Notifications -->
+    <DiceRollToast />
   </div>
 </template>
 

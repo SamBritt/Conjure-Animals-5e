@@ -21,6 +21,13 @@ interface ActionDamage {
   }
 }
 
+interface AttackConditionalData {
+  attackKey: string
+  attack: AvailableAttack
+  conditionalOptions: ActionDamage[]
+  selectedConditional?: ActionDamage
+}
+
 const props = defineProps<{
   attackRolls: AttackRoll[]
   disAdvantage: boolean
@@ -28,21 +35,34 @@ const props = defineProps<{
   attackModifier?: number
   availableAttacks: AvailableAttack[]
   selectedAttack?: AvailableAttack
+  selectedAttacks: AvailableAttack[]
   conditionalDamageOptions: ActionDamage[]
   selectedConditionalDamage?: ActionDamage
+  selectedConditionalDamageMap: Map<string, ActionDamage>
+  attacksWithConditionals: AttackConditionalData[]
 }>()
 
 const emits = defineEmits<{
   selectAttack: [attack: AvailableAttack]
+  toggleAttackSelection: [attack: AvailableAttack]
   selectConditionalDamage: [damageOption: ActionDamage]
+  selectConditionalDamageForAttack: [attackKey: string, damageOption: ActionDamage]
 }>()
 
 const handleAttackSelection = (attack: AvailableAttack) => {
   emits('selectAttack', attack)
 }
 
+const handleToggleAttackSelection = (attack: AvailableAttack) => {
+  emits('toggleAttackSelection', attack)
+}
+
 const handleConditionalDamageSelection = (damageOption: ActionDamage) => {
   emits('selectConditionalDamage', damageOption)
+}
+
+const handleConditionalDamageSelectionForAttack = (attackKey: string, damageOption: ActionDamage) => {
+  emits('selectConditionalDamageForAttack', attackKey, damageOption)
 }
 
 const rollClass = (row: string) => {
@@ -69,16 +89,16 @@ const rollClass = (row: string) => {
   <div class="space-y-4">
     <!-- Attack Selection Section -->
     <div v-if="availableAttacks.length > 0" class="bg-zinc-600 p-3 rounded">
-      <h5 class="text-sm font-medium mb-2 text-white">Select Attack:</h5>
+      <h5 class="text-sm font-medium mb-2 text-white">Select Attacks (one per creature type):</h5>
       <div class="flex flex-wrap gap-2">
         <button
           v-for="attack in availableAttacks"
           :key="`${attack.creature}-${attack.name}`"
-          @click="handleAttackSelection(attack)"
+          @click="handleToggleAttackSelection(attack)"
           :class="[
             'p-2 rounded-md border transition-colors text-sm',
-            selectedAttack?.creature === attack.creature && selectedAttack?.name === attack.name
-              ? 'bg-blue-500 border-blue-400 text-white'
+            selectedAttacks.some(a => a.creature === attack.creature && a.name === attack.name)
+              ? 'bg-green-500 border-green-400 text-white'
               : 'bg-stone-500 border-stone-400 text-white hover:bg-stone-400'
           ]">
           <div class="text-xs text-gray-300">{{ attack.creature }}</div>
@@ -86,26 +106,40 @@ const rollClass = (row: string) => {
           <div class="text-xs text-gray-400">+{{ attack.attackModifier }}</div>
         </button>
       </div>
+      <div class="text-xs text-gray-300 mt-2">
+        Click to select/change attacks. One attack per creature type will be rolled.
+      </div>
     </div>
 
-    <!-- Conditional Damage Selection Section -->
-    <div v-if="conditionalDamageOptions.length > 0" class="bg-zinc-600 p-3 rounded">
-      <h5 class="text-sm font-medium mb-2 text-white">Choose Damage Type:</h5>
-      <div class="flex flex-wrap gap-2">
-        <button
-          v-for="damageOption in conditionalDamageOptions"
-          :key="`${damageOption.formula}-${damageOption.conditional?.condition}`"
-          @click="handleConditionalDamageSelection(damageOption)"
-          :class="[
-            'p-2 rounded-md border transition-colors text-sm',
-            selectedConditionalDamage?.formula === damageOption.formula && 
-            selectedConditionalDamage?.conditional?.condition === damageOption.conditional?.condition
-              ? 'bg-green-500 border-green-400 text-white'
-              : 'bg-stone-500 border-stone-400 text-white hover:bg-stone-400'
-          ]">
-          <div class="font-medium">{{ damageOption.formula }} {{ damageOption.type }}</div>
-          <div class="text-xs text-gray-300">{{ damageOption.conditional?.condition }}</div>
-        </button>
+    <!-- Per-Attack Conditional Damage Selection Section -->
+    <div v-if="attacksWithConditionals.length > 0" class="bg-zinc-600 p-3 rounded">
+      <h5 class="text-sm font-medium mb-3 text-white">Choose Damage Type for Each Attack:</h5>
+      <div class="space-y-3">
+        <div
+          v-for="attackData in attacksWithConditionals"
+          :key="attackData.attackKey"
+          class="bg-zinc-700 p-3 rounded-lg"
+        >
+          <div class="text-sm font-medium text-white mb-2">
+            {{ attackData.attack.creature }} - {{ attackData.attack.name }}
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="damageOption in attackData.conditionalOptions"
+              :key="`${attackData.attackKey}-${damageOption.formula}-${damageOption.conditional?.condition}`"
+              @click="handleConditionalDamageSelectionForAttack(attackData.attackKey, damageOption)"
+              :class="[
+                'p-2 rounded-md border transition-colors text-sm',
+                attackData.selectedConditional?.formula === damageOption.formula && 
+                attackData.selectedConditional?.conditional?.condition === damageOption.conditional?.condition
+                  ? 'bg-green-500 border-green-400 text-white'
+                  : 'bg-stone-500 border-stone-400 text-white hover:bg-stone-400'
+              ]">
+              <div class="font-medium">{{ damageOption.formula }} {{ damageOption.type }}</div>
+              <div class="text-xs text-gray-300">{{ damageOption.conditional?.condition }}</div>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 

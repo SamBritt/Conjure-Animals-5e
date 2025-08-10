@@ -350,7 +350,7 @@ function extractDamageFromText(text) {
   }
 
   // Pattern 2: Conditional damage after "or" - with {@damage} tags
-  const conditionalRegex = /or\s+(\d+)\s+\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage\s+if\s+([^—.,]+?)(?:\s*[—.,]\s*|$)/gi;
+  const conditionalRegex = /or\s+(\d+)\s+\(\{@damage ([^}]+)\}\)\s+([A-Za-z]+)\s+damage\s+(?:if|when)\s+([^—.,]*?)(?:\s*(?:to\s+make|to\s+attack|if\s+|when\s+|plus\s+|\.|,|$))/gi;
   while ((match = conditionalRegex.exec(cleanedText))) {
     const diceData = parseDiceNotation(match[2]);
     if (diceData) {

@@ -185,6 +185,12 @@ const rightAbilities = computed(() => {
           title="Reactions"
           :actions="creature.reactions || []" />
 
+        <!-- Legendary Actions -->
+        <ActionSection
+          v-if="creature.legendary"
+          :title="`Legendary Actions (${creature.legendary.count} per turn)`"
+          :actions="creature.legendary.actions || []" />
+
         <!-- Spellcasting -->
         <SpellcastingSection :spellcasting="creature.spellcasting || []" />
 

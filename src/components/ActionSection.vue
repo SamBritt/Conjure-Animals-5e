@@ -33,7 +33,7 @@ console.log(props.actions)
     
     <!-- Multiattack -->
     <div v-if="multiAttack" class="mb-3">
-      <p class="text-yellow-300 font-semibold italic">Multiattack.</p>
+      <p class="text-yellow-300 font-semibold italic">Multiattack</p>
       <p class="text-sm leading-relaxed">
         <DamageText :text="multiAttack.text" />
       </p>
@@ -41,7 +41,7 @@ console.log(props.actions)
     
     <!-- Attacks -->
     <div v-for="attack in attacks" :key="attack.name" class="mb-3">
-      <p class="text-yellow-300 font-semibold italic">{{ attack.name }}.</p>
+      <p class="text-yellow-300 font-semibold italic">{{ attack.name }}</p>
       <p class="text-sm leading-relaxed">
         <DamageText :text="attack.text" />
       </p>
@@ -49,7 +49,7 @@ console.log(props.actions)
     
     <!-- Other Actions -->
     <div v-for="action in actions" :key="action.name" class="mb-3">
-      <p class="text-yellow-300 font-semibold italic">{{ action.name }}.</p>
+      <p class="text-yellow-300 font-semibold italic">{{ action.name }}</p>
       <p class="text-sm leading-relaxed">
         <DamageText :text="action.text" />
       </p>
