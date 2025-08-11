@@ -9,14 +9,23 @@ interface SummonedCreature extends Creature {
   uuid: string
 }
 
+interface SaveResult {
+  creatureUuid: string
+  abilityType: string
+  result: number
+  modifier: number
+  rollType: 'save' | 'check'
+}
+
 const props = defineProps<{
   creature: SummonedCreature | Creature
   index: number
   type: string
   selected?: boolean
+  saveResult?: SaveResult
 }>()
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'dismissSave'])
 
 const select = () => {
   emit('select', props.creature)
@@ -213,6 +222,21 @@ const hasTemporaryHP = computed(() => {
     
     <!-- Hover Shimmer Effect -->
     <div class="absolute inset-0 rounded-xl bg-gradient-to-r from-transparent via-white to-transparent opacity-0 hover:opacity-5 transition-opacity duration-300 transform -skew-x-12 z-0"></div>
+    
+    <!-- Save Result Overlay -->
+    <div
+      v-if="saveResult"
+      class="absolute -top-12 left-1/2 transform -translate-x-1/2 z-50 bg-zinc-800 border border-zinc-500 rounded-lg px-3 py-2 shadow-lg flex items-center gap-2">
+      <div class="text-center">
+        <div class="text-xs font-medium text-gray-300">{{ saveResult.abilityType }}</div>
+        <div class="text-sm font-bold text-white whitespace-nowrap">{{ saveResult.result }} ({{ saveResult.modifier >= 0 ? '+' : '' }}{{ saveResult.modifier }})</div>
+      </div>
+      <button
+        @click.stop="emit('dismissSave', saveResult.creatureUuid)"
+        class="text-gray-400 hover:text-white text-xs font-bold w-4 h-4 flex items-center justify-center">
+        ×
+      </button>
+    </div>
   </div>
 </template>
 

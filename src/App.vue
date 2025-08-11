@@ -5,11 +5,9 @@ import Button from '@/components/Button.vue'
 
 <template>
   <header>
-    <nav class="flex justify-center gap-4 py-4">
-      <RouterLink to="/">Home</RouterLink>
-      <RouterLink to="/conjure">Conjure</RouterLink>
-      <RouterLink to="/battle">Battle</RouterLink>
-    </nav>
+    <!-- <nav class="flex justify-center gap-4 py-4">
+      <RouterLink to="/">Battle</RouterLink>
+    </nav> -->
   </header>
   <main class="h-screen bg-gray-700">
     

@@ -19,7 +19,18 @@ import DiceIcon from '../assets/dice.svg?component'
 import CheckIcon from '../assets/check.svg?component'
 import DamageBreakdown from '@/components/DamageBreakdown.vue'
 import DiceRollToast from '@/components/DiceRollToast.vue'
+import SavesChecksMenu from '@/components/SavesChecksMenu.vue'
+import CreatureDetailModal from '@/components/CreatureDetailModal.vue'
 import type { AbilityKey, Creature, Attack, ActionDamage } from '@/types/Creatures'
+
+// Interface for save/check results
+interface SaveResult {
+  creatureUuid: string
+  abilityType: string
+  result: number
+  modifier: number
+  rollType: 'save' | 'check' | 'skill'
+}
 
 // Add this interface for summoned creatures
 export interface SummonedCreature extends Creature {
@@ -120,6 +131,17 @@ const attackRolls = ref<AttackRoll[]>([])
 
 const disAdvantage = ref<boolean>(false)
 const advantage = ref<boolean>(false)
+
+// Context menu for saves/checks
+const showContextMenu = ref<boolean>(false)
+const contextMenuX = ref<number>(0)
+const contextMenuY = ref<number>(0)
+const saveResults = ref<SaveResult[]>([])
+const showSaveOverlays = ref<boolean>(false)
+
+// Creature detail modal
+const showCreatureDetailModal = ref<boolean>(false)
+const selectedCreatureForDetails = ref<SummonedCreature | null>(null)
 
 const selectedAttack = ref<AvailableAttack | undefined>()
 const selectedAttacks = ref<AvailableAttack[]>([])
@@ -242,6 +264,47 @@ const handleCreatureSelect = (creature: SummonedCreature): void => {
 
 const handleEnemySelect = (creature: Enemy): void => {
   selectedEnemy.value = creature
+}
+
+// Context menu functions for saves/checks
+const handleContextMenu = (event: MouseEvent): void => {
+  if (attackingCreatures.value.length === 0) return
+  
+  event.preventDefault()
+  contextMenuX.value = event.clientX
+  contextMenuY.value = event.clientY
+  showContextMenu.value = true
+}
+
+const closeContextMenu = (): void => {
+  showContextMenu.value = false
+}
+
+const handleSaveResults = (results: SaveResult[]): void => {
+  saveResults.value = results
+  showSaveOverlays.value = true
+}
+
+const dismissSaveResult = (creatureUuid: string): void => {
+  saveResults.value = saveResults.value.filter(result => result.creatureUuid !== creatureUuid)
+  if (saveResults.value.length === 0) {
+    showSaveOverlays.value = false
+  }
+}
+
+const clearAllSaveResults = (): void => {
+  saveResults.value = []
+  showSaveOverlays.value = false
+}
+
+const handleShowCreatureDetails = (creature: SummonedCreature): void => {
+  selectedCreatureForDetails.value = creature
+  showCreatureDetailModal.value = true
+}
+
+const closeCreatureDetailModal = (): void => {
+  showCreatureDetailModal.value = false
+  selectedCreatureForDetails.value = null
 }
 
 // Drag selection functions
@@ -1002,10 +1065,12 @@ const selectionBoxStyle = computed(() => {
   }
 })
 
+
 // Set up event listeners
 useEventListener('mousedown', startDragSelection)
 useEventListener('mousemove', updateDragSelection)  
 useEventListener('mouseup', endDragSelection)
+useEventListener('click', closeContextMenu)
 
 
 const buttonProps = (style?: ButtonStyle) => {
@@ -1483,7 +1548,8 @@ const buttonProps = (style?: ButtonStyle) => {
 
       <div
         v-if="creatures.length"
-        class="flex flex-col justify-center items-center gap-4 h-full">
+        class="flex flex-col justify-center items-center gap-4 h-full"
+        @contextmenu="handleContextMenu">
         <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
           <CreatureCard
             v-for="(creature, idx) in creatures"
@@ -1492,7 +1558,9 @@ const buttonProps = (style?: ButtonStyle) => {
             :data-creature-uuid="creature.uuid"
             class="creature-card"
             :selected="attackingCreatures.some(c => c.uuid === creature.uuid)"
+            :save-result="saveResults.find(result => result.creatureUuid === creature.uuid)"
             @select="(selectedCreature: SummonedCreature) => handleCreatureSelect(selectedCreature)"
+            @dismiss-save="dismissSaveResult"
             :creature="creature"
             :index="idx + 1" />
         </div>
@@ -1512,6 +1580,33 @@ const buttonProps = (style?: ButtonStyle) => {
       class="selection-box">
     </div>
     
+    <!-- Saves/Checks Context Menu -->
+    <SavesChecksMenu
+      :show="showContextMenu"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      :attacking-creatures="attackingCreatures"
+      @close="closeContextMenu"
+      @results="handleSaveResults"
+      @show-creature-details="handleShowCreatureDetails" />
+    
+    
+    <!-- Clear All Save Results Button -->
+    <button
+      v-if="showSaveOverlays && saveResults.length > 0"
+      @click="clearAllSaveResults"
+      class="fixed top-4 right-4 z-50 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-lg transition-colors flex items-center gap-1">
+      <span>Clear All</span>
+      <span class="text-xs">×</span>
+    </button>
+
+    <!-- Creature Detail Modal -->
+    <CreatureDetailModal
+      v-if="showCreatureDetailModal && selectedCreatureForDetails"
+      :creature="selectedCreatureForDetails"
+      @close="closeCreatureDetailModal"
+      @summon="closeCreatureDetailModal" />
+
     <!-- Dice Roll Toast Notifications -->
     <DiceRollToast />
   </div>

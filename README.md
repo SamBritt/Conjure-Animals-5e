@@ -56,6 +56,15 @@ Beast Manager uses creature data from [5etools](https://5e.tools/):
 3. **Roll Attacks**: Click "Roll Attack" to roll d20s for all selected creatures
 4. **Manual Override**: Hover over roll results to manually mark hits/misses if needed
 
+#### Saves & Ability Checks
+1. **Select Creatures**: Click and drag or individually select creatures on the battlefield
+2. **Right-Click Menu**: Right-click to open the context menu with roll options
+3. **Choose Roll Type**: Select from "Saving Throws", "Ability Checks", or "Skill Checks"
+4. **Select Ability/Skill**: Choose the specific save, ability, or skill to roll
+5. **View Results**: Results appear above each creature showing the roll total and modifier
+6. **Dismiss Results**: Click the "×" on individual results or use "Clear All" button to remove all results
+7. **Creature Details**: When all selected creatures are the same type, access detailed creature information
+
 #### Damage Calculation
 1. **Roll Damage**: After successful attacks, click "Roll Damage" to calculate total damage
 2. **View Breakdown**: Use "Breakdown" to see detailed damage rolls per creature
