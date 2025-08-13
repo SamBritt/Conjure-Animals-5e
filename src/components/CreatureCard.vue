@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineEmits, ref, computed } from 'vue'
+import { defineEmits, ref, computed, nextTick } from 'vue'
 import type { AbilityKey, Creature, Attack } from '@/types/Creatures'
 
 interface SummonedCreature extends Creature {
@@ -30,6 +30,15 @@ const emit = defineEmits(['select', 'dismissSave'])
 const select = () => {
   emit('select', props.creature)
 }
+
+// Computed property to get display name
+const displayName = computed(() => {
+  const enemy = props.creature as any
+  if (props.type === 'enemy' && enemy.alias) {
+    return enemy.alias
+  }
+  return props.creature.name
+})
 
 const creatureClass = computed(() => {
   const baseClasses = [
@@ -82,23 +91,14 @@ const creatureClass = computed(() => {
       ]
     }
   } else {
-    if (props.type === 'creature') {
-      backgroundClasses = [
-        'bg-gradient-to-br',
-        'from-slate-600',
-        'to-slate-800',
-        'hover:from-slate-500',
-        'hover:to-slate-700'
-      ]
-    } else {
-      backgroundClasses = [
-        'bg-gradient-to-br',
-        'from-rose-600',
-        'to-rose-800',
-        'hover:from-rose-500',
-        'hover:to-rose-700'
-      ]
-    }
+    // Both creatures and enemies use gray when unselected
+    backgroundClasses = [
+      'bg-gradient-to-br',
+      'from-slate-600',
+      'to-slate-800',
+      'hover:from-slate-500',
+      'hover:to-slate-700'
+    ]
   }
 
   return [...baseClasses, ...interactionClasses, ...backgroundClasses]
@@ -182,7 +182,7 @@ const hasTemporaryHP = computed(() => {
     <!-- Creature Name -->
     <div class="text-white text-center mb-2">
       <div class="text-xs font-medium truncate w-full px-1 leading-tight">
-        {{ creature.name }}
+        {{ displayName }}
       </div>
     </div>
     

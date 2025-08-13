@@ -19,7 +19,7 @@ import DiceIcon from '../assets/dice.svg?component'
 import CheckIcon from '../assets/check.svg?component'
 import DamageBreakdown from '@/components/DamageBreakdown.vue'
 import DiceRollToast from '@/components/DiceRollToast.vue'
-import SavesChecksMenu from '@/components/SavesChecksMenu.vue'
+import ContextMenu from '@/components/ContextMenu.vue'
 import CreatureDetailModal from '@/components/CreatureDetailModal.vue'
 import type { AbilityKey, Creature, Attack, ActionDamage } from '@/types/Creatures'
 
@@ -50,8 +50,9 @@ interface CreatureSelection {
 interface Enemy {
   index: number
   name: string
+  alias?: string // Custom name/alias for easier identification
   ac: number | null
-  hp: number
+  hp: { average: number }
   missedRolls: number[]
   hitRolls: number[]  // Add this to track successful rolls
 }
@@ -266,14 +267,41 @@ const handleEnemySelect = (creature: Enemy): void => {
   selectedEnemy.value = creature
 }
 
-// Context menu functions for saves/checks
+// Context menu functions for saves/checks  
 const handleContextMenu = (event: MouseEvent): void => {
-  if (attackingCreatures.value.length === 0) return
-  
   event.preventDefault()
-  contextMenuX.value = event.clientX
-  contextMenuY.value = event.clientY
-  showContextMenu.value = true
+  
+  // Determine context based on where the right-click happened
+  const target = event.target as HTMLElement
+  const isOnEnemyArea = target.closest('[data-area="enemies"]') !== null
+  const isOnCreatureArea = target.closest('[data-area="creatures"]') !== null
+  
+  // Clear enemy selection if right-clicking on creature area
+  if (isOnCreatureArea) {
+    selectedEnemy.value = null
+  }
+  
+  // If right-clicking on enemy area, find and select the specific enemy
+  if (isOnEnemyArea) {
+    const enemyCard = target.closest('.creature-card')
+    if (enemyCard) {
+      const enemyIndex = enemyCard.getAttribute('data-enemy-index')
+      if (enemyIndex) {
+        const enemy = enemies.value.find(e => e.index === parseInt(enemyIndex))
+        if (enemy) {
+          selectedEnemy.value = enemy
+        }
+      }
+    }
+  }
+  
+  // Show context menu if we have valid context
+  if ((isOnCreatureArea && attackingCreatures.value.length > 0) || 
+      (isOnEnemyArea && selectedEnemy.value)) {
+    contextMenuX.value = event.clientX
+    contextMenuY.value = event.clientY
+    showContextMenu.value = true
+  }
 }
 
 const closeContextMenu = (): void => {
@@ -305,6 +333,13 @@ const handleShowCreatureDetails = (creature: SummonedCreature): void => {
 const closeCreatureDetailModal = (): void => {
   showCreatureDetailModal.value = false
   selectedCreatureForDetails.value = null
+}
+
+const updateEnemyAlias = (enemy: Enemy, alias: string): void => {
+  const enemyIndex = enemies.value.findIndex(e => e.index === enemy.index)
+  if (enemyIndex !== -1) {
+    enemies.value[enemyIndex].alias = alias
+  }
 }
 
 // Drag selection functions
@@ -398,9 +433,9 @@ const removeEnemies = (count: number): void => {
 const summonEnemies = (): void => {
   enemies.value = Array.from({ length: enemySummonCount.value }, (_, index): Enemy => ({
     index: index + 1,
-    name: '',
+    name: `Enemy ${index + 1}`,
     ac: null,
-    hp: 0,
+    hp: { average: 0 },
     missedRolls: [],
     hitRolls: []  // Initialize empty hit rolls array
   }))
@@ -1086,6 +1121,14 @@ const buttonProps = (style?: ButtonStyle) => {
 </script>
 
 <template>
+  <!-- Enemy Info at Top of Screen -->
+  <EnemyInfo
+    :selectedEnemy="selectedEnemy"
+    :hitEnemyRolls="hitEnemyRolls"
+    :missedEnemyRolls="missedEnemyRolls"
+    :suggestedAC="suggestedAC"
+    @setAC="handleSetEnemyAC" />
+
   <div class="flex h-full overflow-hidden">
     <aside class="bg-gray-800 h-screen p-4 flex flex-col relative">
       <div class="flex flex-col gap-4">
@@ -1529,26 +1572,29 @@ const buttonProps = (style?: ButtonStyle) => {
       <div
         v-if="enemies.length"
         class="flex flex-col justify-center items-center gap-4 h-full">
-        <EnemyInfo
-          :selectedEnemy="selectedEnemy"
-          :hitEnemyRolls="hitEnemyRolls"
-          :missedEnemyRolls="missedEnemyRolls"
-          :suggestedAC="suggestedAC"
-          @setAC="handleSetEnemyAC" />
-        <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
-          <CreatureCard
+        <div 
+          class="flex flex-wrap justify-center items-end gap-2 gap-y-4"
+          data-area="enemies"
+          @contextmenu="handleContextMenu">
+          <div
             v-for="(enemy, idx) in enemies"
-            type="enemy"
             :key="`enemy-${idx}`"
-            @select="(selectedEnemy: Enemy) => handleEnemySelect(selectedEnemy)"
-            :creature="enemy"
-            :index="idx + 1" />
+            :data-enemy-index="enemy.index"
+            class="creature-card">
+            <CreatureCard
+              type="enemy"
+              :selected="selectedEnemy?.index === enemy.index"
+              @select="(selectedEnemy: Enemy) => handleEnemySelect(selectedEnemy)"
+              :creature="enemy"
+              :index="idx + 1" />
+          </div>
         </div>
       </div>
 
       <div
         v-if="creatures.length"
         class="flex flex-col justify-center items-center gap-4 h-full"
+        data-area="creatures"
         @contextmenu="handleContextMenu">
         <div class="flex flex-wrap justify-center items-end gap-2 gap-y-4">
           <CreatureCard
@@ -1580,15 +1626,17 @@ const buttonProps = (style?: ButtonStyle) => {
       class="selection-box">
     </div>
     
-    <!-- Saves/Checks Context Menu -->
-    <SavesChecksMenu
+    <!-- Context Menu -->
+    <ContextMenu
       :show="showContextMenu"
       :x="contextMenuX"
       :y="contextMenuY"
       :attacking-creatures="attackingCreatures"
+      :selected-enemy="selectedEnemy"
       @close="closeContextMenu"
       @results="handleSaveResults"
-      @show-creature-details="handleShowCreatureDetails" />
+      @show-creature-details="handleShowCreatureDetails"
+      @update-enemy-alias="updateEnemyAlias" />
     
     
     <!-- Clear All Save Results Button -->

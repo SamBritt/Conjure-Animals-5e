@@ -59,7 +59,7 @@ Beast Manager uses creature data from [5etools](https://5e.tools/):
 #### Saves & Ability Checks
 1. **Select Creatures**: Click and drag or individually select creatures on the battlefield
 2. **Right-Click Menu**: Right-click to open the context menu with roll options
-3. **Choose Roll Type**: Select from "Saving Throws", "Ability Checks", or "Skill Checks"
+3. **Choose Roll Type**: Select from "Saving Throws" or "Skill Checks"
 4. **Select Ability/Skill**: Choose the specific save, ability, or skill to roll
 5. **View Results**: Results appear above each creature showing the roll total and modifier
 6. **Dismiss Results**: Click the "×" on individual results or use "Clear All" button to remove all results

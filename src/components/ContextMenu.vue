@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import type { AbilityKey } from '@/types/Creatures'
 
 interface SummonedCreature {
@@ -22,20 +22,39 @@ interface SaveResult {
   rollType: 'save' | 'check'
 }
 
+interface Enemy {
+  index: number
+  name: string
+  alias?: string
+  ac: number | null
+  hp: { average: number }
+  missedRolls: number[]
+  hitRolls: number[]
+}
+
 const props = defineProps<{
   show: boolean
   x: number
   y: number
   attackingCreatures: SummonedCreature[]
+  selectedEnemy?: Enemy | null
 }>()
 
 const emit = defineEmits<{
   close: []
   results: [results: SaveResult[]]
   showCreatureDetails: [creature: SummonedCreature]
+  updateEnemyAlias: [enemy: Enemy, alias: string]
 }>()
 
-const contextMenuMode = ref<'main' | 'saves' | 'checks' | 'skills'>('main')
+const contextMenuMode = ref<'main' | 'saves' | 'skills' | 'editName'>('main')
+
+// Check what type of context menu to show
+const isCreatureContext = computed(() => props.attackingCreatures.length > 0 && !props.selectedEnemy)
+const isEnemyContext = computed(() => props.selectedEnemy !== null && props.selectedEnemy !== undefined)
+
+// Enemy name editing state
+const editingEnemyName = ref('')
 
 // Define all D&D 5e skills with their associated abilities
 const skillList = [
@@ -83,10 +102,6 @@ const showSavesMenu = (event: Event): void => {
   contextMenuMode.value = 'saves'
 }
 
-const showChecksMenu = (event: Event): void => {
-  event.stopPropagation()
-  contextMenuMode.value = 'checks'
-}
 
 const showSkillsMenu = (event: Event): void => {
   event.stopPropagation()
@@ -97,6 +112,28 @@ const showCreatureDetails = (event: Event): void => {
   event.stopPropagation()
   // Pass the first creature since they're all the same type
   emit('showCreatureDetails', props.attackingCreatures[0])
+  closeMenu()
+}
+
+const nameInput = ref<HTMLInputElement>()
+
+const showEnemyNameEdit = (event: Event): void => {
+  event.stopPropagation()
+  if (props.selectedEnemy) {
+    editingEnemyName.value = props.selectedEnemy.alias || props.selectedEnemy.name
+    contextMenuMode.value = 'editName'
+    
+    nextTick(() => {
+      nameInput.value?.focus()
+      nameInput.value?.select()
+    })
+  }
+}
+
+const saveEnemyName = (): void => {
+  if (props.selectedEnemy && editingEnemyName.value.trim()) {
+    emit('updateEnemyAlias', props.selectedEnemy, editingEnemyName.value.trim())
+  }
   closeMenu()
 }
 
@@ -121,27 +158,6 @@ const rollSaves = (abilityType: string): void => {
   closeMenu()
 }
 
-const rollChecks = (abilityType: string): void => {
-  const results: SaveResult[] = []
-  
-  props.attackingCreatures.forEach(creature => {
-    const roll = Math.floor(Math.random() * 20) + 1
-    const baseModifier = creature.abilities[abilityType as AbilityKey].mod
-    // TODO: Add skill proficiency parsing for checks
-    const result = roll + baseModifier
-    
-    results.push({
-      creatureUuid: creature.uuid,
-      abilityType: abilityType.toUpperCase(),
-      result,
-      modifier: baseModifier,
-      rollType: 'check'
-    })
-  })
-  
-  emit('results', results)
-  closeMenu()
-}
 
 const rollSkillCheck = (skillName: string): void => {
   const results: SaveResult[] = []
@@ -189,45 +205,52 @@ const rollSkillCheck = (skillName: string): void => {
     :style="{ left: x + 'px', top: y + 'px' }"
     :class="[
       'fixed z-50 bg-zinc-800 border border-zinc-600 rounded-lg shadow-lg min-w-40',
-      contextMenuMode === 'main' ? 'py-2' : ''
+      (contextMenuMode === 'main' || contextMenuMode === 'saves') ? 'py-2' : ''
     ]">
     
     <!-- Main Menu -->
     <template v-if="contextMenuMode === 'main'">
-      <button
-        @click="showSavesMenu"
-        @click.stop
-        class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors">
-        Saving Throws
-      </button>
-      <button
-        @click="showChecksMenu"
-        @click.stop
-        class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors">
-        Ability Checks
-      </button>
-      <button
-        @click="showSkillsMenu"
-        @click.stop
-        class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors">
-        Skill Checks
-      </button>
-      <button
-        v-if="allCreaturesSameType"
-        @click="showCreatureDetails"
-        @click.stop
-        class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors border-t border-zinc-600">
-        Creature Details
-      </button>
+      <!-- Creature options (when creatures are selected) -->
+      <template v-if="isCreatureContext">
+        <button
+          @click="showSavesMenu"
+          @click.stop
+          class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors">
+          Saving Throws
+        </button>
+        <button
+          @click="showSkillsMenu"
+          @click.stop
+          class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors">
+          Skill Checks
+        </button>
+        <button
+          v-if="allCreaturesSameType"
+          @click="showCreatureDetails"
+          @click.stop
+          class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors border-t border-zinc-600">
+          Creature Details
+        </button>
+      </template>
+      
+      <!-- Enemy options (when enemy is selected) -->
+      <template v-if="isEnemyContext">
+        <button
+          @click="showEnemyNameEdit"
+          @click.stop
+          class="w-full px-3 py-2 text-left text-sm text-white hover:bg-zinc-700 transition-colors">
+          Edit Name
+        </button>
+      </template>
     </template>
     
-    <!-- Ability Selection Menu (Saves & Ability Checks) -->
-    <template v-else-if="contextMenuMode === 'saves' || contextMenuMode === 'checks'">
+    <!-- Ability Selection Menu (Saves Only) -->
+    <template v-else-if="contextMenuMode === 'saves'">
       <div class="grid grid-cols-3">
         <button
           v-for="(ability, index) in ['str', 'dex', 'con', 'int', 'wis', 'cha']"
           :key="ability"
-          @click="contextMenuMode === 'saves' ? rollSaves(ability) : rollChecks(ability)"
+          @click="rollSaves(ability)"
           @click.stop
           :class="[
             'px-3 py-2 text-sm font-medium text-white hover:bg-zinc-700 transition-colors',
@@ -253,6 +276,33 @@ const rollSkillCheck = (skillName: string): void => {
           <span>{{ skill.name }}</span>
           <span class="text-xs text-gray-400">{{ skill.ability.toUpperCase() }}</span>
         </button>
+      </div>
+    </template>
+    
+    <!-- Enemy Name Edit Menu -->
+    <template v-else-if="contextMenuMode === 'editName'">
+      <div class="p-3">
+        <div class="text-xs text-gray-300 mb-2">Edit Enemy Name:</div>
+        <input
+          v-model="editingEnemyName"
+          @keydown.enter="saveEnemyName"
+          @keydown.escape="closeMenu"
+          class="w-full px-2 py-1 bg-zinc-700 border border-zinc-500 rounded text-white text-sm focus:outline-none focus:border-blue-400"
+          maxlength="20"
+          placeholder="Enter name..."
+          ref="nameInput" />
+        <div class="flex gap-2 mt-2">
+          <button
+            @click="saveEnemyName"
+            class="flex-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded transition-colors">
+            Save
+          </button>
+          <button
+            @click="closeMenu"
+            class="flex-1 px-2 py-1 bg-gray-600 hover:bg-gray-500 text-white text-xs rounded transition-colors">
+            Cancel
+          </button>
+        </div>
       </div>
     </template>
   </div>
